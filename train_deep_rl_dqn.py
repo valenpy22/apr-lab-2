@@ -13,13 +13,41 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from cubesat_detumbling_rl import CubeSatDetumblingEnv  # Tu entorno de CubeSat personalizado
 from SatellitePersonality import SatellitePersonality  # Parámetros del satélite
 
+
+# Adapter wrapper to make a Gymnasium env present the legacy Gym API
+# (reset()->obs, step()->(obs, reward, done, info)). Stable-Baselines3's
+# DummyVecEnv expects the old-style reset/step signatures, otherwise it may
+# try to store a tuple into a numeric buffer and raise the ValueError shown.
+class GymnasiumToGymWrapper(gym.Wrapper):
+    def reset(self, **kwargs):
+        result = self.env.reset(**kwargs)
+        # Gymnasium reset returns (obs, info)
+        if isinstance(result, tuple) and len(result) == 2:
+            obs, info = result
+            return obs
+        return result
+
+    def step(self, action):
+        result = self.env.step(action)
+        # Gymnasium step returns (obs, reward, terminated, truncated, info)
+        if isinstance(result, tuple) and len(result) == 5:
+            obs, reward, terminated, truncated, info = result
+            done = bool(terminated or truncated)
+            return obs, reward, done, info
+        return result
+
 def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     """
     Crea el entorno y lo envuelve con DummyVecEnv para hacerlo compatible con Stable Baselines3
     """
-    env = CubeSatDetumblingEnv(render_mode='human')  # Ajusta según tus parámetros
-    #env = DummyVecEnv([lambda: env])  # Wrapper para hacer compatible con Stable-Baselines3
-    return env
+    # Create the environment instance. Use render_mode=None for training to avoid GUI.
+    env = CubeSatDetumblingEnv(render_mode=None)
+
+    # Wrap to present legacy Gym API expected by some SB3 wrappers
+    env = GymnasiumToGymWrapper(env)
+
+    # Return a vectorized env for SB3
+    return DummyVecEnv([lambda: env])
 
 def train_dqn(cfg):
     """Entrenamiento del modelo DQN"""
@@ -52,12 +80,11 @@ def train_dqn(cfg):
 def evaluate_model(model_path, env_id, n_eval_episodes=10):
     """Evaluar el modelo entrenado"""
     model = DQN.load(model_path)
-
-    # Crear el entorno para evaluación
-    env = gym.make(env_id)
+    # Crear el entorno para evaluación (usar make_env para consistencia)
+    eval_env = make_env(env_id, seed=0, monitor_path=None)
 
     # Evaluar el rendimiento del modelo
-    mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=n_eval_episodes)
+    mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=n_eval_episodes)
     print(f"Evaluación del modelo: Recompensa Media: {mean_reward} ± {std_reward}")
     return mean_reward, std_reward
 
