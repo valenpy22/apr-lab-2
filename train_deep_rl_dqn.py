@@ -14,6 +14,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from cubesat_detumbling_rl import CubeSatDetumblingEnv  # Tu entorno de CubeSat personalizado
 from SatellitePersonality import SatellitePersonality  # Parámetros del satélite
 
+best_reward = -float('inf')  # Inicializa la mejor recompensa con un valor muy bajo
 
 # Adapter wrapper to make a Gymnasium env present the legacy Gym API
 # (reset()->obs, step()->(obs, reward, done, info)). Stable-Baselines3's
@@ -211,7 +212,7 @@ def train_dqn(cfg, best_params):
         model.learn(total_timesteps=1)
 
     model.learn(total_timesteps=cfg['total_timesteps'])
-
+    
     # Guardar el modelo entrenado
     model_path = os.path.join(cfg['save_dir'], f"{run_id}.zip")
     model.save(model_path)
@@ -238,35 +239,70 @@ def evaluate_model(model_path, env_id, n_eval_episodes=10):
     print(f"Evaluación del modelo: Recompensa Media: {mean_reward} ± {std_reward}")
     return mean_reward, std_reward
 
-def objective(trial, env):
+def objective(trial, env, save_dir):
+    """
+    Función objetivo para optimizar los hiperparámetros con Optuna.
+    En cada trial, se entrena el modelo con los hiperparámetros sugeridos y se guarda el modelo si mejora.
+    
+    Args:
+    trial: El objeto de Optuna que sugiere los hiperparámetros.
+    env: El entorno de entrenamiento.
+    save_dir: El directorio donde guardar los modelos entrenados.
+    """
+    global best_reward
+
     # Sugerir hiperparámetros para DQN
     learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-1, log=True)
     batch_size = trial.suggest_categorical('batch_size', [32, 64, 128, 256])
     gamma = trial.suggest_float('gamma', 0.9, 0.999)
 
+    # Crear y entrenar el modelo con los hiperparámetros sugeridos
     model = DQN("MlpPolicy", 
                 env, 
                 learning_rate=learning_rate, 
                 batch_size=batch_size, 
                 gamma=gamma, 
-                verbose=0)
-    model.learn(total_timesteps=1000)
+                verbose=1)
+    
+    # Entrenar el modelo
+    model.learn(total_timesteps=100)
+    
+    # Evaluar el rendimiento del modelo usando el entorno
     mean_reward, _ = evaluate_policy(model, env, n_eval_episodes=5)
+    print(f"Recompensa media para lr={learning_rate}, bs={batch_size}, gamma={gamma}: {mean_reward}")
+
+    # Guardar el modelo si es el mejor hasta ahora
+    model_path = os.path.join(save_dir, f"best_model_{learning_rate}_{batch_size}_{gamma}.zip")
+    
+    # Guardar el modelo solo si la recompensa media es la mejor encontrada
+    if mean_reward > best_reward:
+        print(f"Nuevo mejor modelo encontrado con recompensa: {mean_reward}")
+        model.save(model_path)
+        best_reward = mean_reward  # Actualizar la mejor recompensa
+    
     return mean_reward
 
 # Función para optimizar los hiperparámetros con Optuna
-def optimize_hyperparameters(env):
+def optimize_hyperparameters(env, save_dir):
+    """
+    Optimiza los hiperparámetros utilizando Optuna y guarda el mejor modelo entrenado.
+    
+    Args:
+    env: El entorno de entrenamiento.
+    save_dir: El directorio donde guardar los modelos.
+    """
     # Crear un estudio de Optuna para maximizar la recompensa media
     study = optuna.create_study(direction='maximize')
     
     # Optimizar los hiperparámetros con Optuna
-    study.optimize(lambda trial: objective(trial, env), n_trials=100)
+    study.optimize(lambda trial: objective(trial, env, save_dir), n_trials=100)
 
     # Imprimir los mejores hiperparámetros encontrados por Optuna
     print("Best hyperparameters: ", study.best_params)
 
     # Retornar los mejores hiperparámetros
     return study.best_params
+
 
 def main():
     # Cargar las configuraciones del satélite desde el archivo SatellitePersonality
@@ -287,11 +323,10 @@ def main():
     env = make_env(cfg['env_id'], cfg['seed'], 'monitor.csv')
 
     # Optimización de hiperparámetros con Optuna
-    best_params = optimize_hyperparameters(env)
+    best_params = optimize_hyperparameters(env, cfg['save_dir'])
 
     # Entrenamiento del modelo
     model_path = train_dqn(cfg, best_params)
-    print(f"[OK] Modelo entrenado guardado en: {model_path}")
 
     # Evaluar el modelo entrenado
     evaluate_model(model_path, cfg['env_id'], n_eval_episodes=10)
