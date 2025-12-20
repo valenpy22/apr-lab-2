@@ -1,6 +1,6 @@
 # Librerías a utilizar
 import gymnasium as gym
-from gymnasium import spaces
+from gym import spaces
 import numpy as np
 import time
 
@@ -350,6 +350,11 @@ class CubeSatDetumblingEnv(gym.Env):
                 angular_velocity,
                 mag_field_body
             ]).astype(np.float32)
+
+            observation = observation.flatten()
+
+            print("Forma de la observación:", observation.shape)
+            print("Observación:", observation)
 
             return observation
 

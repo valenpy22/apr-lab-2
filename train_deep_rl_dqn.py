@@ -17,8 +17,8 @@ def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     """
     Crea el entorno y lo envuelve con DummyVecEnv para hacerlo compatible con Stable Baselines3
     """
-    env = CubeSatDetumblingEnv(render_mode=None, max_steps=500, granularity=40)  # Ajusta según tus parámetros
-    env = DummyVecEnv([lambda: env])  # Wrapper para hacer compatible con Stable-Baselines3
+    env = CubeSatDetumblingEnv(render_mode='human')  # Ajusta según tus parámetros
+    #env = DummyVecEnv([lambda: env])  # Wrapper para hacer compatible con Stable-Baselines3
     return env
 
 def train_dqn(cfg):
