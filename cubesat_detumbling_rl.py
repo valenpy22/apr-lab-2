@@ -72,7 +72,7 @@ class CubeSatDetumblingEnv(gym.Env):
         self.action_map = self.create_action_map_xyz()
         self.action_space = spaces.Discrete(len(self.action_map))
         #self.action_space = spaces.Discrete(2)
-        print(type(self.action_space))  # Esto debería mostrar <class 'gym.spaces.discrete.Discrete'>
+        #print(type(self.action_space))  # Esto debería mostrar <class 'gym.spaces.discrete.Discrete'>
 
         # definir espacio de observaciones
         # box: quaternion (4) + velocidad angular (3) + campo magnetico (3)
@@ -353,8 +353,8 @@ class CubeSatDetumblingEnv(gym.Env):
 
             observation = observation.flatten()
 
-            print("Forma de la observación:", observation.shape)
-            print("Observación:", observation)
+            #print("Forma de la observación:", observation.shape)
+            #print("Observación:", observation)
 
             return observation
 

@@ -93,7 +93,7 @@ conda activate nuevo_entorno
 ## 3. Instalar las dependencias
 ```bash
 conda install -c conda-forge stable-baselines3 gymnasium optuna matplotlib pyzmq python-dotenv pyIGRF pymongo pillow
-pip install pybamm skyfield numpy scipy
+pip install pybamm skyfield numpy scipy gym gymnasium
 conda install -c conda-forge tensorboard  # Opcional, solo si deseas usar TensorBoard
 ```
 
@@ -104,7 +104,7 @@ source set_env.sh
 
 ## 5. Ejecutar el código
 ```bash
-python train_deep_rl_ppo.py
+python train_deep_rl_dqn.py
 
 ```
 

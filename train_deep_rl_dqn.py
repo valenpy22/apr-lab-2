@@ -3,6 +3,7 @@ import os
 import gymnasium as gym
 import numpy as np
 import time
+import optuna
 import matplotlib.pyplot as plt
 from stable_baselines3 import DQN  # Cambiar PPO a DQN
 from stable_baselines3.common.utils import set_random_seed
@@ -49,7 +50,76 @@ def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     # Return a vectorized env for SB3
     return DummyVecEnv([lambda: env])
 
-def train_dqn(cfg):
+def plot_rewards_per_episode(reward_history):
+    """
+    Grafica las recompensas obtenidas por el agente durante cada episodio.
+    
+    Args:
+    reward_history (list): Lista de recompensas acumuladas por episodio.
+    """
+    plt.figure(figsize=(10, 6))
+    plt.plot(reward_history, label="Recompensa por Episodio", color='tab:blue')
+    plt.xlabel('Episodio')
+    plt.ylabel('Recompensa Acumulada')
+    plt.title('Recompensa por Episodio durante el Entrenamiento')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+def plot_success_rate(success_history):
+    """
+    Grafica la tasa de éxito acumulada durante el entrenamiento.
+    
+    Args:
+    success_history (list): Lista de 1s y 0s indicando si un episodio fue exitoso (1) o no (0).
+    """
+    success_rate = np.cumsum(success_history) / np.arange(1, len(success_history) + 1)
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(success_rate, label="Tasa de Éxito Acumulada", color='tab:green')
+    plt.xlabel('Episodio')
+    plt.ylabel('Tasa de Éxito')
+    plt.title('Tasa de Éxito Acumulada durante el Entrenamiento')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+def plot_average_reward_per_episode(reward_history, window_size=50):
+    """
+    Grafica la recompensa media por episodio con una ventana deslizante para suavizar el gráfico.
+    
+    Args:
+    reward_history (list): Lista de recompensas acumuladas por episodio.
+    window_size (int): Tamaño de la ventana para la media móvil.
+    """
+    smoothed_rewards = np.convolve(reward_history, np.ones(window_size) / window_size, mode='valid')
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(smoothed_rewards, label=f'Recompensa Media ({window_size} episodios)', color='tab:orange')
+    plt.xlabel('Episodio')
+    plt.ylabel('Recompensa Media')
+    plt.title(f'Recompensa Media por Episodio (Ventana {window_size})')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+def plot_success_rate_per_episode(success_history):
+    """
+    Grafica la tasa de éxito (1 o 0) de cada episodio.
+    
+    Args:
+    success_history (list): Lista de 1s y 0s indicando si un episodio fue exitoso (1) o no (0).
+    """
+    plt.figure(figsize=(10, 6))
+    plt.plot(success_history, label="Tasa de Éxito por Episodio", color='tab:red', linestyle='--')
+    plt.xlabel('Episodio')
+    plt.ylabel('Éxito (1) / No Éxito (0)')
+    plt.title('Tasa de Éxito por Episodio durante el Entrenamiento')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+def train_dqn(cfg, best_params):
     """Entrenamiento del modelo DQN"""
     os.makedirs(cfg['log_dir'], exist_ok=True)
     os.makedirs(cfg['save_dir'], exist_ok=True)
@@ -67,7 +137,44 @@ def train_dqn(cfg):
     env = make_env(cfg['env_id'], cfg['seed'], monitor_path)
 
     # Definir el modelo DQN
-    model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=run_path)
+    model = DQN("MlpPolicy", 
+                env, 
+                learning_rate=best_params['learning_rate'],
+                batch_size=best_params['batch_size'],
+                gamma=best_params['gamma'],
+                verbose=1, tensorboard_log=run_path)
+
+    # Listas para almacenar las métricas
+    reward_history = []
+    success_history = []
+
+    # Entrenamiento
+    for episode in range(cfg['total_timesteps']):
+        obs, _ = env.reset()  # Reiniciar entorno
+        done = False
+        total_reward = 0
+
+        while not done:
+            # Selección de acción usando la red neuronal de DQN (usando la política greedy)
+            action, _states = model.predict(obs, deterministic=True)
+
+            # Realiza la acción y recibe la retroalimentación
+            new_obs, reward, terminated, truncated, _ = env.step(action)
+
+            # Acumulando recompensa total del episodio
+            total_reward += reward
+            done = terminated or truncated
+
+            # Guardar el nuevo estado
+            obs = new_obs
+
+        # Almacenar las métricas después de cada episodio
+        reward_history.append(total_reward)
+        success_history.append(1 if total_reward >= 100 else 0)  # Umbral para éxito (ajustar si es necesario)
+
+        # Actualización de la red neuronal (esto lo hace Stable-Baselines3)
+        model.learn(total_timesteps=1)
+
     model.learn(total_timesteps=cfg['total_timesteps'])
 
     # Guardar el modelo entrenado
@@ -75,6 +182,13 @@ def train_dqn(cfg):
     model.save(model_path)
 
     env.close()
+
+    # Graficar las métricas después del entrenamiento
+    plot_rewards_per_episode(reward_history)
+    plot_success_rate(success_history)
+    plot_average_reward_per_episode(reward_history, window_size=50)
+    plot_success_rate_per_episode(success_history)
+
     return model_path
 
 def evaluate_model(model_path, env_id, n_eval_episodes=10):
@@ -88,6 +202,36 @@ def evaluate_model(model_path, env_id, n_eval_episodes=10):
     print(f"Evaluación del modelo: Recompensa Media: {mean_reward} ± {std_reward}")
     return mean_reward, std_reward
 
+def objective(trial, env):
+    # Sugerir hiperparámetros para DQN
+    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-1, log=True)
+    batch_size = trial.suggest_categorical('batch_size', [32, 64, 128, 256])
+    gamma = trial.suggest_float('gamma', 0.9, 0.999)
+
+    model = DQN("MlpPolicy", 
+                env, 
+                learning_rate=learning_rate, 
+                batch_size=batch_size, 
+                gamma=gamma, 
+                verbose=0)
+    model.learn(total_timesteps=1000)
+    mean_reward, _ = evaluate_policy(model, env, n_eval_episodes=5)
+    return mean_reward
+
+# Función para optimizar los hiperparámetros con Optuna
+def optimize_hyperparameters(env):
+    # Crear un estudio de Optuna para maximizar la recompensa media
+    study = optuna.create_study(direction='maximize')
+    
+    # Optimizar los hiperparámetros con Optuna
+    study.optimize(lambda trial: objective(trial, env), n_trials=100)
+
+    # Imprimir los mejores hiperparámetros encontrados por Optuna
+    print("Best hyperparameters: ", study.best_params)
+
+    # Retornar los mejores hiperparámetros
+    return study.best_params
+
 def main():
     # Cargar las configuraciones del satélite desde el archivo SatellitePersonality
     print(f"Nombre del satélite: {SatellitePersonality.SATELLITE_NAME}")
@@ -96,15 +240,21 @@ def main():
     # Definir la configuración del entorno y del modelo
     cfg = {
         'env_id': 'CubeSatDetumblingEnv',  # Reemplazar con tu entorno específico de estabilización de satélite
-        'total_timesteps': 200000,
+        'total_timesteps': 100,
         'seed': 123,
         'log_dir': 'logs',
         'save_dir': 'models',
         'model_name': 'dqn_satellite',
     }
 
+    # Crear entorno
+    env = make_env(cfg['env_id'], cfg['seed'], 'monitor.csv')
+
+    # Optimización de hiperparámetros con Optuna
+    best_params = optimize_hyperparameters(env)
+
     # Entrenamiento del modelo
-    model_path = train_dqn(cfg)
+    model_path = train_dqn(cfg, best_params)
     print(f"[OK] Modelo entrenado guardado en: {model_path}")
 
     # Evaluar el modelo entrenado
