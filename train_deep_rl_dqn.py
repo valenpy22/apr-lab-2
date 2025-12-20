@@ -50,7 +50,7 @@ def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     # Return a vectorized env for SB3
     return DummyVecEnv([lambda: env])
 
-def plot_rewards_per_episode(reward_history):
+def save_plot_rewards_per_episode(reward_history, hyperparameters, save_dir):
     """
     Grafica las recompensas obtenidas por el agente durante cada episodio.
     
@@ -66,12 +66,22 @@ def plot_rewards_per_episode(reward_history):
     plt.legend()
     plt.show()
 
-def plot_success_rate(success_history):
+    # Crear un nombre de archivo basado en los hiperparámetros
+    filename = f"recompensa_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
+    filepath = os.path.join(save_dir, filename)
+    
+    # Guardar la imagen
+    plt.savefig(filepath)
+    plt.close()
+
+def save_plot_success_rate(success_history, hyperparameters, save_dir):
     """
-    Grafica la tasa de éxito acumulada durante el entrenamiento.
+    Grafica la tasa de éxito acumulada durante el entrenamiento y guarda la imagen.
     
     Args:
     success_history (list): Lista de 1s y 0s indicando si un episodio fue exitoso (1) o no (0).
+    hyperparameters (dict): Diccionario con los mejores hiperparámetros.
+    save_dir (str): Directorio donde guardar la imagen.
     """
     success_rate = np.cumsum(success_history) / np.arange(1, len(success_history) + 1)
     
@@ -82,14 +92,23 @@ def plot_success_rate(success_history):
     plt.title('Tasa de Éxito Acumulada durante el Entrenamiento')
     plt.grid(True)
     plt.legend()
-    plt.show()
 
-def plot_average_reward_per_episode(reward_history, window_size=50):
+    # Crear un nombre de archivo basado en los hiperparámetros
+    filename = f"tasa_exito_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
+    filepath = os.path.join(save_dir, filename)
+    
+    # Guardar la imagen
+    plt.savefig(filepath)
+    plt.close()
+
+def save_plot_average_reward_per_episode(reward_history, hyperparameters, save_dir, window_size=50):
     """
-    Grafica la recompensa media por episodio con una ventana deslizante para suavizar el gráfico.
+    Grafica la recompensa media por episodio con una ventana deslizante para suavizar el gráfico y guarda la imagen.
     
     Args:
     reward_history (list): Lista de recompensas acumuladas por episodio.
+    hyperparameters (dict): Diccionario con los mejores hiperparámetros.
+    save_dir (str): Directorio donde guardar la imagen.
     window_size (int): Tamaño de la ventana para la media móvil.
     """
     smoothed_rewards = np.convolve(reward_history, np.ones(window_size) / window_size, mode='valid')
@@ -101,14 +120,23 @@ def plot_average_reward_per_episode(reward_history, window_size=50):
     plt.title(f'Recompensa Media por Episodio (Ventana {window_size})')
     plt.grid(True)
     plt.legend()
-    plt.show()
 
-def plot_success_rate_per_episode(success_history):
+    # Crear un nombre de archivo basado en los hiperparámetros
+    filename = f"recompensa_media_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
+    filepath = os.path.join(save_dir, filename)
+    
+    # Guardar la imagen
+    plt.savefig(filepath)
+    plt.close()
+
+def save_plot_success_rate_per_episode(success_history, hyperparameters, save_dir):
     """
-    Grafica la tasa de éxito (1 o 0) de cada episodio.
+    Grafica la tasa de éxito (1 o 0) de cada episodio y guarda la imagen.
     
     Args:
     success_history (list): Lista de 1s y 0s indicando si un episodio fue exitoso (1) o no (0).
+    hyperparameters (dict): Diccionario con los mejores hiperparámetros.
+    save_dir (str): Directorio donde guardar la imagen.
     """
     plt.figure(figsize=(10, 6))
     plt.plot(success_history, label="Tasa de Éxito por Episodio", color='tab:red', linestyle='--')
@@ -117,7 +145,14 @@ def plot_success_rate_per_episode(success_history):
     plt.title('Tasa de Éxito por Episodio durante el Entrenamiento')
     plt.grid(True)
     plt.legend()
-    plt.show()
+
+    # Crear un nombre de archivo basado en los hiperparámetros
+    filename = f"tasa_exito_ep_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
+    filepath = os.path.join(save_dir, filename)
+    
+    # Guardar la imagen
+    plt.savefig(filepath)
+    plt.close()
 
 def train_dqn(cfg, best_params):
     """Entrenamiento del modelo DQN"""
@@ -183,11 +218,12 @@ def train_dqn(cfg, best_params):
 
     env.close()
 
-    # Graficar las métricas después del entrenamiento
-    plot_rewards_per_episode(reward_history)
-    plot_success_rate(success_history)
-    plot_average_reward_per_episode(reward_history, window_size=50)
-    plot_success_rate_per_episode(success_history)
+    # Guardar los gráficos después del entrenamiento
+    save_plot_rewards_per_episode(reward_history, best_params, cfg['save_dir'])
+    save_plot_success_rate(success_history, best_params, cfg['save_dir'])
+    save_plot_average_reward_per_episode(reward_history, best_params, cfg['save_dir'], window_size=50)
+    save_plot_success_rate_per_episode(success_history, best_params, cfg['save_dir'])
+
 
     return model_path
 
