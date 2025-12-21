@@ -1,10 +1,14 @@
 from datetime import datetime
 import os
+os.environ['MPLBACKEND'] = 'Agg'  # Establecer el backend de Matplotlib antes de importar matplotlib
 import gymnasium as gym
 import numpy as np
 import time
 import optuna
+import matplotlib
+matplotlib.use('Agg', force=True)  # Usar backend no interactivo para guardar imágenes
 import matplotlib.pyplot as plt
+plt.ioff()  # Desactivar el modo interactivo de Matplotlib
 from stable_baselines3 import DQN  # Cambiar PPO a DQN
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -51,6 +55,42 @@ def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     # Return a vectorized env for SB3
     return DummyVecEnv([lambda: env])
 
+
+def train_dqn_return_model(env, hyperparams, total_timesteps=100, tensorboard_log=None):
+    """
+    Entrena un modelo DQN con los hiperparámetros dados sobre el env y devuelve
+    (model, reward_history, success_history).
+
+    - env: vectorized env (DummyVecEnv)
+    - hyperparams: dict con keys 'learning_rate','batch_size','gamma'
+    - total_timesteps: número de timesteps para model.learn
+    """
+    # Construir el modelo
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=hyperparams.get('learning_rate', 1e-3),
+        batch_size=hyperparams.get('batch_size', 64),
+        gamma=hyperparams.get('gamma', 0.99),
+        verbose=1,
+        tensorboard_log=tensorboard_log,
+    )
+
+    # Entrenar
+    model.learn(total_timesteps=total_timesteps)
+
+    # Evaluar con varios episodios para recoger reward history y success
+    try:
+        ep_rewards, ep_lengths = evaluate_policy(model, env, n_eval_episodes=5, return_episode_rewards=True)
+        # ep_rewards is a list of episode rewards
+        reward_history = list(ep_rewards)
+        success_history = [1 if r >= 100 else 0 for r in reward_history]
+    except Exception:
+        reward_history = []
+        success_history = []
+
+    return model, reward_history, success_history
+
 def save_plot_rewards_per_episode(reward_history, hyperparameters, save_dir):
     """
     Grafica las recompensas obtenidas por el agente durante cada episodio.
@@ -58,6 +98,8 @@ def save_plot_rewards_per_episode(reward_history, hyperparameters, save_dir):
     Args:
     reward_history (list): Lista de recompensas acumuladas por episodio.
     """
+    if not reward_history:
+        return
     plt.figure(figsize=(10, 6))
     plt.plot(reward_history, label="Recompensa por Episodio", color='tab:blue')
     plt.xlabel('Episodio')
@@ -65,7 +107,6 @@ def save_plot_rewards_per_episode(reward_history, hyperparameters, save_dir):
     plt.title('Recompensa por Episodio durante el Entrenamiento')
     plt.grid(True)
     plt.legend()
-    plt.show()
 
     # Crear un nombre de archivo basado en los hiperparámetros
     filename = f"recompensa_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
@@ -86,6 +127,8 @@ def save_plot_success_rate(success_history, hyperparameters, save_dir):
     """
     success_rate = np.cumsum(success_history) / np.arange(1, len(success_history) + 1)
     
+    if not success_history:
+        return
     plt.figure(figsize=(10, 6))
     plt.plot(success_rate, label="Tasa de Éxito Acumulada", color='tab:green')
     plt.xlabel('Episodio')
@@ -98,7 +141,6 @@ def save_plot_success_rate(success_history, hyperparameters, save_dir):
     filename = f"tasa_exito_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
     filepath = os.path.join(save_dir, filename)
     
-    # Guardar la imagen
     plt.savefig(filepath)
     plt.close()
 
@@ -112,6 +154,8 @@ def save_plot_average_reward_per_episode(reward_history, hyperparameters, save_d
     save_dir (str): Directorio donde guardar la imagen.
     window_size (int): Tamaño de la ventana para la media móvil.
     """
+    if not reward_history:
+        return
     smoothed_rewards = np.convolve(reward_history, np.ones(window_size) / window_size, mode='valid')
     
     plt.figure(figsize=(10, 6))
@@ -126,7 +170,6 @@ def save_plot_average_reward_per_episode(reward_history, hyperparameters, save_d
     filename = f"recompensa_media_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
     filepath = os.path.join(save_dir, filename)
     
-    # Guardar la imagen
     plt.savefig(filepath)
     plt.close()
 
@@ -139,6 +182,8 @@ def save_plot_success_rate_per_episode(success_history, hyperparameters, save_di
     hyperparameters (dict): Diccionario con los mejores hiperparámetros.
     save_dir (str): Directorio donde guardar la imagen.
     """
+    if not success_history:
+        return
     plt.figure(figsize=(10, 6))
     plt.plot(success_history, label="Tasa de Éxito por Episodio", color='tab:red', linestyle='--')
     plt.xlabel('Episodio')
@@ -151,7 +196,6 @@ def save_plot_success_rate_per_episode(success_history, hyperparameters, save_di
     filename = f"tasa_exito_ep_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
     filepath = os.path.join(save_dir, filename)
     
-    # Guardar la imagen
     plt.savefig(filepath)
     plt.close()
 
@@ -172,46 +216,10 @@ def train_dqn(cfg, best_params):
     # Crear entorno y envolver con DummyVecEnv para ser compatible con Stable-Baselines3
     env = make_env(cfg['env_id'], cfg['seed'], monitor_path)
 
-    # Definir el modelo DQN
-    model = DQN("MlpPolicy", 
-                env, 
-                learning_rate=best_params['learning_rate'],
-                batch_size=best_params['batch_size'],
-                gamma=best_params['gamma'],
-                verbose=1, tensorboard_log=run_path)
-
-    # Listas para almacenar las métricas
-    reward_history = []
-    success_history = []
-
-    # Entrenamiento
-    for episode in range(cfg['total_timesteps']):
-        obs, _ = env.reset()  # Reiniciar entorno
-        done = False
-        total_reward = 0
-
-        while not done:
-            # Selección de acción usando la red neuronal de DQN (usando la política greedy)
-            action, _states = model.predict(obs, deterministic=True)
-
-            # Realiza la acción y recibe la retroalimentación
-            new_obs, reward, terminated, truncated, _ = env.step(action)
-
-            # Acumulando recompensa total del episodio
-            total_reward += reward
-            done = terminated or truncated
-
-            # Guardar el nuevo estado
-            obs = new_obs
-
-        # Almacenar las métricas después de cada episodio
-        reward_history.append(total_reward)
-        success_history.append(1 if total_reward >= 100 else 0)  # Umbral para éxito (ajustar si es necesario)
-
-        # Actualización de la red neuronal (esto lo hace Stable-Baselines3)
-        model.learn(total_timesteps=1)
-
-    model.learn(total_timesteps=cfg['total_timesteps'])
+    # Entrenar el modelo usando helper (devuelve el modelo entrenado y métricas)
+    model, reward_history, success_history = train_dqn_return_model(
+        env, best_params, total_timesteps=cfg['total_timesteps'], tensorboard_log=run_path
+    )
     
     # Guardar el modelo entrenado
     model_path = os.path.join(cfg['save_dir'], f"{run_id}.zip")
@@ -236,10 +244,14 @@ def evaluate_model(model_path, env_id, n_eval_episodes=10):
 
     # Evaluar el rendimiento del modelo
     mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=n_eval_episodes)
+    try:
+        eval_env.close()
+    except Exception:
+        pass
     print(f"Evaluación del modelo: Recompensa Media: {mean_reward} ± {std_reward}")
     return mean_reward, std_reward
 
-def objective(trial, env, save_dir):
+def objective(trial, save_dir, cfg):
     """
     Función objetivo para optimizar los hiperparámetros con Optuna.
     En cada trial, se entrena el modelo con los hiperparámetros sugeridos y se guarda el modelo si mejora.
@@ -248,60 +260,74 @@ def objective(trial, env, save_dir):
     trial: El objeto de Optuna que sugiere los hiperparámetros.
     env: El entorno de entrenamiento.
     save_dir: El directorio donde guardar los modelos entrenados.
+    cfg: La configuración del entorno y los parámetros del modelo.
     """
-    global best_reward
+    global best_reward  # Acceder a la variable global best_reward
 
     # Sugerir hiperparámetros para DQN
     learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-1, log=True)
     batch_size = trial.suggest_categorical('batch_size', [32, 64, 128, 256])
     gamma = trial.suggest_float('gamma', 0.9, 0.999)
 
-    # Crear y entrenar el modelo con los hiperparámetros sugeridos
-    model = DQN("MlpPolicy", 
-                env, 
-                learning_rate=learning_rate, 
-                batch_size=batch_size, 
-                gamma=gamma, 
-                verbose=1)
-    
-    # Entrenar el modelo
-    model.learn(total_timesteps=100)
-    
-    # Evaluar el rendimiento del modelo usando el entorno
-    mean_reward, _ = evaluate_policy(model, env, n_eval_episodes=5)
+    hyperparams = {'learning_rate': learning_rate, 'batch_size': batch_size, 'gamma': gamma}
+
+    # Create a lightweight env for this trial (use quick=True if implemented in make_env/CubeSat)
+    trial_env = make_env(cfg['env_id'], seed=trial.number, monitor_path=None)
+
+    # Train a small model for this trial
+    trial_timesteps = max(100, int(cfg.get('trial_timesteps', 200)))
+    model, reward_history, success_history = train_dqn_return_model(trial_env, hyperparams, total_timesteps=trial_timesteps, tensorboard_log=None)
+
+    # Evaluate the trained trial model
+    try:
+        mean_reward, std_reward = evaluate_policy(model, trial_env, n_eval_episodes=5)
+    except Exception:
+        mean_reward, std_reward = -float('inf'), float('inf')
+
     print(f"Recompensa media para lr={learning_rate}, bs={batch_size}, gamma={gamma}: {mean_reward}")
 
-    # Guardar el modelo si es el mejor hasta ahora
-    model_path = os.path.join(save_dir, f"best_model_{learning_rate}_{batch_size}_{gamma}.zip")
-    
-    # Guardar el modelo solo si la recompensa media es la mejor encontrada
+    # Update best model
     if mean_reward > best_reward:
-        print(f"Nuevo mejor modelo encontrado con recompensa: {mean_reward}")
-        model.save(model_path)
-        best_reward = mean_reward  # Actualizar la mejor recompensa
-    
+        mp = os.path.join(save_dir, f"best_model_{learning_rate}_{batch_size}_{gamma}.zip")
+        model.save(mp)
+        best_reward = mean_reward
+
+    # Guardar gráficos después de cada trial
+    save_plot_rewards_per_episode(reward_history, hyperparams, save_dir)  # Graficar recompensas por episodio
+    save_plot_success_rate(success_history, hyperparams, save_dir)  # Graficar tasa de éxito acumulada
+    save_plot_average_reward_per_episode(reward_history, hyperparams, save_dir, window_size=50)  # Recompensa media
+    save_plot_success_rate_per_episode(success_history, hyperparams, save_dir)  # Tasa de éxito por episodio
+
+    # cleanup trial env
+    try:
+        trial_env.close()
+    except Exception:
+        pass
+
     return mean_reward
 
 # Función para optimizar los hiperparámetros con Optuna
-def optimize_hyperparameters(env, save_dir):
+def optimize_hyperparameters(save_dir, cfg):
     """
     Optimiza los hiperparámetros utilizando Optuna y guarda el mejor modelo entrenado.
     
     Args:
     env: El entorno de entrenamiento.
     save_dir: El directorio donde guardar los modelos.
+    cfg: La configuración del entorno y los parámetros del modelo.
     """
     # Crear un estudio de Optuna para maximizar la recompensa media
     study = optuna.create_study(direction='maximize')
     
     # Optimizar los hiperparámetros con Optuna
-    study.optimize(lambda trial: objective(trial, env, save_dir), n_trials=100)
+    study.optimize(lambda trial: objective(trial, save_dir, cfg), n_trials=cfg.get('n_trials', 20))
 
     # Imprimir los mejores hiperparámetros encontrados por Optuna
     print("Best hyperparameters: ", study.best_params)
 
     # Retornar los mejores hiperparámetros
     return study.best_params
+
 
 
 def main():
@@ -319,11 +345,11 @@ def main():
         'model_name': 'dqn_satellite',
     }
 
-    # Crear entorno
-    env = make_env(cfg['env_id'], cfg['seed'], 'monitor.csv')
-
-    # Optimización de hiperparámetros con Optuna
-    best_params = optimize_hyperparameters(env, cfg['save_dir'])
+    # Optimización de hiperparámetros con Optuna (se crean envs por trial internamente)
+    # reducimos trials por defecto para pruebas rápidas
+    cfg.setdefault('n_trials', 10)
+    cfg.setdefault('trial_timesteps', 200)
+    best_params = optimize_hyperparameters(cfg['save_dir'], cfg)
 
     # Entrenamiento del modelo
     model_path = train_dqn(cfg, best_params)
