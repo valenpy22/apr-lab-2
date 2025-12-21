@@ -56,7 +56,7 @@ def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     return DummyVecEnv([lambda: env])
 
 
-def train_dqn_return_model(env, hyperparams, total_timesteps=100, tensorboard_log=None):
+def train_dqn_return_model(env, hyperparams, total_timesteps=200000, tensorboard_log=None):
     """
     Entrena un modelo DQN con los hiperparámetros dados sobre el env y devuelve
     (model, reward_history, success_history).
@@ -69,6 +69,8 @@ def train_dqn_return_model(env, hyperparams, total_timesteps=100, tensorboard_lo
     model = DQN(
         "MlpPolicy",
         env,
+        exploration_fraction=0.4, # Explora durante 40% del entrenamiento
+        exploration_final_eps=0.1, # Nunca deja de explorar del todo
         learning_rate=hyperparams.get('learning_rate', 1e-3),
         batch_size=hyperparams.get('batch_size', 64),
         gamma=hyperparams.get('gamma', 0.99),
@@ -275,7 +277,7 @@ def objective(trial, save_dir, cfg):
     trial_env = make_env(cfg['env_id'], seed=trial.number, monitor_path=None)
 
     # Train a small model for this trial
-    trial_timesteps = max(100, int(cfg.get('trial_timesteps', 200)))
+    trial_timesteps = max(100000, int(cfg.get('trial_timesteps', 100000)))
     model, reward_history, success_history = train_dqn_return_model(trial_env, hyperparams, total_timesteps=trial_timesteps, tensorboard_log=None)
 
     # Evaluate the trained trial model
@@ -338,7 +340,7 @@ def main():
     # Definir la configuración del entorno y del modelo
     cfg = {
         'env_id': 'CubeSatDetumblingEnv',  # Reemplazar con tu entorno específico de estabilización de satélite
-        'total_timesteps': 100,
+        'total_timesteps': 200000,
         'seed': 123,
         'log_dir': 'logs',
         'save_dir': 'models',
