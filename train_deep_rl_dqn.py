@@ -9,10 +9,11 @@ import matplotlib
 matplotlib.use('Agg', force=True)  # Usar backend no interactivo para guardar imágenes
 import matplotlib.pyplot as plt
 plt.ioff()  # Desactivar el modo interactivo de Matplotlib
-from stable_baselines3 import DQN  # Cambiar PPO a DQN
+from stable_baselines3 import DQN 
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.monitor import Monitor
 
 # Asegúrate de que importas tu entorno personalizado CubeSatDetumblingEnv
 from cubesat_detumbling_rl import CubeSatDetumblingEnv  # Tu entorno de CubeSat personalizado
@@ -51,6 +52,8 @@ def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
 
     # Wrap to present legacy Gym API expected by some SB3 wrappers
     env = GymnasiumToGymWrapper(env)
+
+    env = Monitor(env)
 
     # Return a vectorized env for SB3
     return DummyVecEnv([lambda: env])
@@ -115,7 +118,7 @@ def save_plot_rewards_per_episode(reward_history, hyperparameters, save_dir):
     filepath = os.path.join(save_dir, filename)
     
     # Guardar la imagen
-    plt.savefig(filepath)
+    plt.savefig(filepath, dpi=150, bbox_inches="tight")
     plt.close()
 
 def save_plot_success_rate(success_history, hyperparameters, save_dir):
@@ -142,8 +145,8 @@ def save_plot_success_rate(success_history, hyperparameters, save_dir):
     # Crear un nombre de archivo basado en los hiperparámetros
     filename = f"tasa_exito_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
     filepath = os.path.join(save_dir, filename)
-    
-    plt.savefig(filepath)
+
+    plt.savefig(filepath, dpi=150, bbox_inches="tight")
     plt.close()
 
 def save_plot_average_reward_per_episode(reward_history, hyperparameters, save_dir, window_size=50):
@@ -171,8 +174,8 @@ def save_plot_average_reward_per_episode(reward_history, hyperparameters, save_d
     # Crear un nombre de archivo basado en los hiperparámetros
     filename = f"recompensa_media_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
     filepath = os.path.join(save_dir, filename)
-    
-    plt.savefig(filepath)
+
+    plt.savefig(filepath, dpi=150, bbox_inches="tight")
     plt.close()
 
 def save_plot_success_rate_per_episode(success_history, hyperparameters, save_dir):
@@ -197,8 +200,8 @@ def save_plot_success_rate_per_episode(success_history, hyperparameters, save_di
     # Crear un nombre de archivo basado en los hiperparámetros
     filename = f"tasa_exito_ep_{hyperparameters['learning_rate']}_lr_{hyperparameters['batch_size']}_bs_{hyperparameters['gamma']}_gamma.png"
     filepath = os.path.join(save_dir, filename)
-    
-    plt.savefig(filepath)
+
+    plt.savefig(filepath, dpi=150, bbox_inches="tight")
     plt.close()
 
 def train_dqn(cfg, best_params):
@@ -266,6 +269,10 @@ def objective(trial, save_dir, cfg):
     """
     global best_reward  # Acceder a la variable global best_reward
 
+    # 1) Carpeta del trial (AQUÍ VA)
+    trial_dir = os.path.join(save_dir, f"trial_{trial.number}")
+    os.makedirs(trial_dir, exist_ok=True)
+
     # Sugerir hiperparámetros para DQN
     learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-1, log=True)
     batch_size = trial.suggest_categorical('batch_size', [32, 64, 128, 256])
@@ -277,7 +284,8 @@ def objective(trial, save_dir, cfg):
     trial_env = make_env(cfg['env_id'], seed=trial.number, monitor_path=None)
 
     # Train a small model for this trial
-    trial_timesteps = max(100000, int(cfg.get('trial_timesteps', 100000)))
+    trial_timesteps = int(cfg.get('trial_timesteps', 200))
+    trial_timesteps = max(100, trial_timesteps)
     model, reward_history, success_history = train_dqn_return_model(trial_env, hyperparams, total_timesteps=trial_timesteps, tensorboard_log=None)
 
     # Evaluate the trained trial model
@@ -290,15 +298,15 @@ def objective(trial, save_dir, cfg):
 
     # Update best model
     if mean_reward > best_reward:
-        mp = os.path.join(save_dir, f"best_model_{learning_rate}_{batch_size}_{gamma}.zip")
+        mp = os.path.join(trial_dir, f"best_model_{learning_rate}_{batch_size}_{gamma}.zip")
         model.save(mp)
         best_reward = mean_reward
 
     # Guardar gráficos después de cada trial
-    save_plot_rewards_per_episode(reward_history, hyperparams, save_dir)  # Graficar recompensas por episodio
-    save_plot_success_rate(success_history, hyperparams, save_dir)  # Graficar tasa de éxito acumulada
-    save_plot_average_reward_per_episode(reward_history, hyperparams, save_dir, window_size=50)  # Recompensa media
-    save_plot_success_rate_per_episode(success_history, hyperparams, save_dir)  # Tasa de éxito por episodio
+    save_plot_rewards_per_episode(reward_history, hyperparams, trial_dir)  # Graficar recompensas por episodio
+    save_plot_success_rate(success_history, hyperparams, trial_dir)  # Graficar tasa de éxito acumulada
+    save_plot_average_reward_per_episode(reward_history, hyperparams, trial_dir, window_size=50)  # Recompensa media
+    save_plot_success_rate_per_episode(success_history, hyperparams, trial_dir)  # Tasa de éxito por episodio
 
     # cleanup trial env
     try:
@@ -318,19 +326,26 @@ def optimize_hyperparameters(save_dir, cfg):
     save_dir: El directorio donde guardar los modelos.
     cfg: La configuración del entorno y los parámetros del modelo.
     """
+
+    storage_path = os.path.join(save_dir, "optuna_dqn.db")
+    storage = f"sqlite:///{storage_path}"
+
+    study_name = "dqn_cubesat"
+
     # Crear un estudio de Optuna para maximizar la recompensa media
-    study = optuna.create_study(direction='maximize')
-    
+    study = optuna.create_study(direction='maximize', storage=storage, study_name=study_name, load_if_exists=True)
+
+    n_trials = cfg.get('n_trials', 100)
     # Optimizar los hiperparámetros con Optuna
-    study.optimize(lambda trial: objective(trial, save_dir, cfg), n_trials=cfg.get('n_trials', 20))
+    study.optimize(lambda trial: objective(trial, save_dir, cfg), n_trials=n_trials)
 
     # Imprimir los mejores hiperparámetros encontrados por Optuna
+    print("Best trial:", study.best_trial.number)
+    print("Best value: ", study.best_value)
     print("Best hyperparameters: ", study.best_params)
 
     # Retornar los mejores hiperparámetros
     return study.best_params
-
-
 
 def main():
     # Cargar las configuraciones del satélite desde el archivo SatellitePersonality
