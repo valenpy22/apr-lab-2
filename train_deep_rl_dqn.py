@@ -95,7 +95,7 @@ def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     env = CubeSatDetumblingEnv(render_mode=None)
 
     # Wrap to present legacy Gym API expected by some SB3 wrappers
-    env = GymnasiumToGymWrapper(env)
+    # env = GymnasiumToGymWrapper(env)
 
     env = Monitor(env)
 
@@ -611,8 +611,8 @@ def main():
     cfg = {
         'env_id': 'CubeSatDetumblingEnv', 
         'total_timesteps': 200_000,    # Entrenamiento final largo (ej. 200k pasos)
-        'trial_timesteps': 1_000,     # Entrenamiento corto para pruebas de Optuna (ej. 10k pasos)
-        'n_trials': 10,                # Cuántas pruebas hará Optuna
+        'trial_timesteps': 20_000,     # Entrenamiento corto para pruebas de Optuna (ej. 10k pasos)
+        'n_trials': 15,                # Cuántas pruebas hará Optuna
         'seed': 123,                   # Semilla para reproducibilidad
         'log_dir': 'logs',             # Carpeta para TensorBoard
         'save_dir': 'models',          # Carpeta para guardar .zip y .db

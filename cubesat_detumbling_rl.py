@@ -1,6 +1,6 @@
 # Librerías a utilizar
 import gymnasium as gym
-from gym import spaces
+from gymnasium import spaces
 import numpy as np
 import time
 
@@ -132,17 +132,17 @@ class CubeSatDetumblingEnv(gym.Env):
 
         for tx in axis_bins:
             action_map[index] = np.array([tx, 0, 0])
-            print(action_map[index])
+            # print(action_map[index])
             index += 1
         
         for ty in axis_bins:
             action_map[index] = np.array([0, ty, 0])
-            print(action_map[index])
+            # print(action_map[index])
             index += 1
 
         for tz in axis_bins_z:
             action_map[index] = np.array([0, 0, tz])
-            print(action_map[index])
+            # print(action_map[index])
             index += 1
 
         # print(action_map)
@@ -411,7 +411,7 @@ class CubeSatDetumblingEnv(gym.Env):
         control_effort = np.linalg.norm(action)
         
         # Recompensa base: exponencial negativa (más sensible a cambios pequeños)
-        base_reward = -np.exp(angular_vel_norm) + 1.0
+        base_reward = -angular_vel_norm
         
         # Reward shaping: premiar mejora gradual
         improvement = previous_angular_vel_norm - angular_vel_norm
