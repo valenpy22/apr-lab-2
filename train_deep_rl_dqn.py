@@ -20,6 +20,7 @@ from optuna.visualization import plot_optimization_history
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.callbacks import BaseCallback
 import joblib
+import json
 from typing import Tuple, Dict, Any
 
 from cubesat_detumbling_rl import CubeSatDetumblingEnv  
@@ -318,7 +319,7 @@ def train_dqn(cfg, best_params):
     # 4. Ejecución del entrenamiento
     # Se llama a la función helper que contiene la lógica del bucle principal
     model, reward_history, success_history = train_dqn_return_model(
-        env, best_params, total_timesteps=cfg['total_timesteps'], tensorboard_log=run_path
+        env, best_params, total_timesteps=cfg['total_timesteps'], tensorboard_log=None
     )
     
     # 5. Persistencia
@@ -335,11 +336,11 @@ def train_dqn(cfg, best_params):
     return model_path
 
 def evaluate_model(
-    model_path: str, 
-    env_id: str, 
+    model_path: str,
+    env_id: str,
     n_eval_episodes: int = 10,
     deterministic: bool = True
-) -> Tuple[float, float]:
+) -> Tuple[float, float, float]:
     """
     Carga un modelo DQN entrenado y evalúa su rendimiento en un entorno nuevo.
 
@@ -383,12 +384,18 @@ def evaluate_model(
 
     # 3. Evaluar
     # evaluate_policy se encarga de resetear el env y acumular rewards
-    mean_reward, std_reward = evaluate_policy(
-        model, 
-        eval_env, 
+    ep_rewards, ep_lengths = evaluate_policy(
+        model,
+        eval_env,
         n_eval_episodes=n_eval_episodes,
-        deterministic=deterministic
+        deterministic=deterministic,
+        return_episode_rewards=True
     )
+
+    # Calcular métricas
+    mean_reward = np.mean(ep_rewards) if ep_rewards else 0.0
+    std_reward = np.std(ep_rewards) if ep_rewards else 0.0
+    success_rate = sum(1 for r in ep_rewards if r >= 100) / len(ep_rewards) if ep_rewards else 0.0
 
     # 4. Limpieza
     try:
@@ -398,8 +405,9 @@ def evaluate_model(
 
     print(f"Evaluación del modelo '{model_path}':")
     print(f"  -> Recompensa Media: {mean_reward:.2f} +/- {std_reward:.2f}")
+    print(f"  -> Tasa de Éxito: {success_rate:.2%}")
 
-    return mean_reward, std_reward
+    return mean_reward, std_reward, success_rate
 
 def objective(trial: optuna.trial.Trial, cfg: Dict[str, Any]) -> float:
     """
@@ -610,8 +618,8 @@ def main():
     # Es buena práctica tener todo aquí para no tocar código interno después.
     cfg = {
         'env_id': 'CubeSatDetumblingEnv', 
-        'total_timesteps': 200_000,    # Entrenamiento final largo (ej. 200k pasos)
-        'trial_timesteps': 20_000,     # Entrenamiento corto para pruebas de Optuna (ej. 10k pasos)
+        'total_timesteps': 20,    # Entrenamiento final largo (ej. 200k pasos)
+        'trial_timesteps': 10,     # Entrenamiento corto para pruebas de Optuna (ej. 10k pasos)
         'n_trials': 15,                # Cuántas pruebas hará Optuna
         'seed': 123,                   # Semilla para reproducibilidad
         'log_dir': 'logs',             # Carpeta para TensorBoard
@@ -631,6 +639,12 @@ def main():
     # Esto busca la mejor combinación de learning_rate, gamma, etc.
     best_params = optimize_hyperparameters(cfg)
 
+    # Guardar mejores hiperparámetros en JSON
+    hyperparams_path = os.path.join(cfg['save_dir'], 'best_hyperparams.json')
+    with open(hyperparams_path, 'w') as f:
+        json.dump(best_params, f, indent=4)
+    print(f"Mejores hiperparámetros guardados en: {hyperparams_path}")
+
     print("\n" + "="*50)
     print("FASE 2: Entrenamiento del modelo final")
     print("="*50)
@@ -647,9 +661,9 @@ def main():
 
     # 4. Evaluar el modelo entrenado
     # Cargamos el modelo guardado y probamos 10 episodios para ver la métrica final
-    mean_reward, std_reward = evaluate_model(
-        model_path=model_path, 
-        env_id=cfg['env_id'], 
+    mean_reward, std_reward, success_rate = evaluate_model(
+        model_path=model_path,
+        env_id=cfg['env_id'],
         n_eval_episodes=10,
         deterministic=True # Importante para evaluación final
     )
@@ -657,6 +671,7 @@ def main():
     print(f"\nResultados finales del proyecto:")
     print(f"-> Modelo guardado en: {model_path}")
     print(f"-> Performance Final: {mean_reward:.2f} +/- {std_reward:.2f}")
+    print(f"-> Tasa de Éxito: {success_rate:.2%}")
 
 if __name__ == "__main__":
     main()

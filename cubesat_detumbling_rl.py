@@ -6,14 +6,14 @@ import time
 
 
 import matplotlib
-matplotlib.use("TkAgg")  # Backend interactivo
+matplotlib.use('Agg')  # Backend no interactivo para evitar problemas con hilos
 import matplotlib.pyplot as plt
 import matplotlib
 from zmq.backend import second
 
 plt.close('all')
 
-matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
