@@ -618,8 +618,8 @@ def main():
     # Es buena práctica tener todo aquí para no tocar código interno después.
     cfg = {
         'env_id': 'CubeSatDetumblingEnv', 
-        'total_timesteps': 20,    # Entrenamiento final largo (ej. 200k pasos)
-        'trial_timesteps': 10,     # Entrenamiento corto para pruebas de Optuna (ej. 10k pasos)
+        'total_timesteps': 200000,    # Entrenamiento final largo (ej. 200k pasos)
+        'trial_timesteps': 20000,     # Entrenamiento corto para pruebas de Optuna (ej. 10k pasos)
         'n_trials': 15,                # Cuántas pruebas hará Optuna
         'seed': 123,                   # Semilla para reproducibilidad
         'log_dir': 'logs',             # Carpeta para TensorBoard
