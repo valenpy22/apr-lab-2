@@ -411,7 +411,7 @@ class CubeSatDetumblingEnv(gym.Env):
         control_effort = np.linalg.norm(action)
         
         # Recompensa base: exponencial negativa (más sensible a cambios pequeños)
-        base_reward = -angular_vel_norm
+        base_reward = -np.exp(angular_vel_norm) + 1.0
         
         # Reward shaping: premiar mejora gradual
         improvement = previous_angular_vel_norm - angular_vel_norm
@@ -421,7 +421,7 @@ class CubeSatDetumblingEnv(gym.Env):
         control_penalty = -0.01 * control_effort
         
         # Bonus por lograr objetivo
-        success_bonus = 20.0 if angular_vel_norm < self.success_threshold else 0.0
+        success_bonus = 100.0 if angular_vel_norm < self.success_threshold else 0.0
         
         reward = base_reward + shaped_reward + control_penalty + success_bonus
         
