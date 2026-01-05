@@ -295,6 +295,7 @@ class CubeSatDetumblingEnv(gym.Env):
         try:
             angular_vel_norm = np.linalg.norm(self.rotation_sim.angular_velocity)
             terminated = angular_vel_norm < self.success_threshold
+            terminated = bool(terminated)
         except Exception:
             angular_vel_norm = 1.0
             terminated = False
@@ -303,12 +304,13 @@ class CubeSatDetumblingEnv(gym.Env):
         # parametro "truncated" (revisar docs en gymnasium)
         self.current_step += 1
         truncated = self.current_step >= self.max_steps
+        truncated = bool(truncated)
 
         # retornar info adicional
         info = {
             'angular_velocity_norm': angular_vel_norm,
             'episode_reward': self.episode_reward,
-            'success': terminated
+            'success': bool(terminated),
         }
 
         if self.render_mode == 'human':
@@ -411,19 +413,19 @@ class CubeSatDetumblingEnv(gym.Env):
         control_effort = np.linalg.norm(action)
         
         # Recompensa base: exponencial negativa (más sensible a cambios pequeños)
-        base_reward = -np.exp(angular_vel_norm) + 1.0
+        # base_reward = -np.exp(angular_vel_norm) + 1.0
         
         # Reward shaping: premiar mejora gradual
         improvement = previous_angular_vel_norm - angular_vel_norm
-        shaped_reward = 10.0 * improvement  # Multiplicador alto para cambios pequeños
+        # shaped_reward = 10.0 * improvement  # Multiplicador alto para cambios pequeños
         
         # Penalización de control reducida
         control_penalty = -0.01 * control_effort
         
         # Bonus por lograr objetivo
-        success_bonus = 100.0 if angular_vel_norm < self.success_threshold else 0.0
+        success_bonus = 10.0 if angular_vel_norm < self.success_threshold else 0.0
         
-        reward = base_reward + shaped_reward + control_penalty + success_bonus
+        reward = improvement + control_penalty + success_bonus
         
         return reward
 

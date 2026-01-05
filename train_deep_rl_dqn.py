@@ -55,7 +55,7 @@ class TrialEvalCallback(EvalCallback):
     Callback que evalúa el modelo periódicamente y le avisa a Optuna.
     Si el modelo va mal, Optuna manda la orden de cortar (Pruning).
     """
-    def __init__(self, eval_env, trial, n_eval_episodes=5, eval_freq=1000, deterministic=True, verbose=0):
+    def __init__(self, eval_env, trial, n_eval_episodes=50, eval_freq=1000, deterministic=True, verbose=0):
         super().__init__(
             eval_env=eval_env,
             n_eval_episodes=n_eval_episodes,
@@ -71,13 +71,11 @@ class TrialEvalCallback(EvalCallback):
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
             super()._on_step()
             self.eval_idx += 1
-            # Reportar a Optuna la recompensa media actual
             self.trial.report(self.last_mean_reward, self.eval_idx)
-            # Preguntar a Optuna si debemos abortar
             if self.trial.should_prune():
-                self.is_pruned = True
-                return False # Esto detiene model.learn() inmediatamente
+                raise optuna.exceptions.TrialPruned()
         return True
+
 
 def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     """
@@ -92,16 +90,13 @@ def make_env(env_id: str, seed: int, monitor_path: str) -> gym.Env:
     1) GymnasiumToGymWrapper para adaptar la API de Gymnasium a Gym.
     2) Monitor para registrar estadísticas.
     """
-    # Create the environment instance. Use render_mode=None for training to avoid GUI.
-    env = CubeSatDetumblingEnv(render_mode=None)
-
-    # Wrap to present legacy Gym API expected by some SB3 wrappers
-    # env = GymnasiumToGymWrapper(env)
-
-    env = Monitor(env)
-
-    # Return a vectorized env for SB3
-    return DummyVecEnv([lambda: env])
+    def _init():
+        env = CubeSatDetumblingEnv(render_mode=None)
+        env = Monitor(env, filename=monitor_path)  # si monitor_path es None, igual funciona
+        env.reset(seed=seed)
+        env.action_space.seed(seed)
+        return env
+    return DummyVecEnv([_init])
 
 def train_dqn_return_model(env, hyperparams, total_timesteps=200000, tensorboard_log=None, trial=None):
     """
@@ -122,14 +117,14 @@ def train_dqn_return_model(env, hyperparams, total_timesteps=200000, tensorboard
     model = DQN(
         "MlpPolicy",
         env,
-        exploration_fraction=0.4,
+        exploration_fraction=0.6,
         exploration_final_eps=0.05,
         learning_rate=hyperparams.get('learning_rate', 1e-3),
         batch_size=hyperparams.get('batch_size', 64),
-        gamma=hyperparams.get('gamma', 0.99),
+        gamma=hyperparams.get('gamma', 0.995),
         train_freq=hyperparams.get('train_freq', 4),
         buffer_size=hyperparams.get('buffer_size', 1000000),
-        learning_starts=hyperparams.get('learning_starts', 100),
+        learning_starts=hyperparams.get('learning_starts', 2000),
         target_update_interval=hyperparams.get('target_update_interval', 10000),
         gradient_steps=1,
         verbose=1,
@@ -147,8 +142,8 @@ def train_dqn_return_model(env, hyperparams, total_timesteps=200000, tensorboard
         eval_callback = TrialEvalCallback(
             eval_env=eval_env, 
             trial=trial,
-            n_eval_episodes=3,
-            eval_freq=1000,
+            n_eval_episodes=10,
+            eval_freq=5000,
         )
         callbacks.append(eval_callback)
 
@@ -614,17 +609,17 @@ def main():
     except NameError:
         print("Aviso: 'SatellitePersonality' no está definido, saltando info de cabecera.")
 
-    # 1. Configuración Centralizada (Diccionario maestro)
-    # Es buena práctica tener todo aquí para no tocar código interno después.
+    # # 1. Configuración Centralizada (Diccionario maestro)
+    # # Es buena práctica tener todo aquí para no tocar código interno después.
     cfg = {
         'env_id': 'CubeSatDetumblingEnv', 
         'total_timesteps': 500_000,    # Entrenamiento final largo (ej. 200k pasos)
         'trial_timesteps': 30_000,     # Entrenamiento corto para pruebas de Optuna (ej. 10k pasos)
-        'n_trials': 15,                # Cuántas pruebas hará Optuna
+        'n_trials': 20,                # Cuántas pruebas hará Optuna
         'seed': 123,                   # Semilla para reproducibilidad
         'log_dir': 'logs',             # Carpeta para TensorBoard
         'save_dir': 'models',          # Carpeta para guardar .zip y .db
-        'model_name': 'dqn_satellite_final',
+        'model_name': 'dqn_satellite_final2',
     }
 
     # Asegurar que los directorios existen antes de empezar
@@ -640,7 +635,7 @@ def main():
     best_params = optimize_hyperparameters(cfg)
 
     # Guardar mejores hiperparámetros en JSON
-    hyperparams_path = os.path.join(cfg['save_dir'], 'best_hyperparams.json')
+    hyperparams_path = os.path.join(cfg['save_dir'], 'best_hyperparams2.json')
     with open(hyperparams_path, 'w') as f:
         json.dump(best_params, f, indent=4)
     print(f"Mejores hiperparámetros guardados en: {hyperparams_path}")
@@ -664,7 +659,7 @@ def main():
     mean_reward, std_reward, success_rate = evaluate_model(
         model_path=model_path,
         env_id=cfg['env_id'],
-        n_eval_episodes=10,
+        n_eval_episodes=50,
         deterministic=True # Importante para evaluación final
     )
 
