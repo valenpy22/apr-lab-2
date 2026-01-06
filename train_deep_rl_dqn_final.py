@@ -24,7 +24,7 @@ from cubesat_detumbling_rl import CubeSatDetumblingEnv
 # =========================
 # Env factory
 # =========================
-def make_env(max_steps=400, granularity=40, time_step=1.0, seed=0, log_dir=None):
+def make_env(max_steps=400, granularity=40, time_step=0.1, seed=0, log_dir=None):
     def _init():
         env = CubeSatDetumblingEnv(
             render_mode=None,
@@ -295,7 +295,7 @@ def train_dqn_with_params(
     model.learn(total_timesteps=total_timesteps, callback=eval_cb, progress_bar=True)
 
     model.save(save_path_last)
-    best_model_path = os.path.join(best_dir, "best_model")
+    best_model_path = os.path.join(best_dir, "best_model2")
 
     eval_env.close()
     train_env.close()
@@ -466,7 +466,7 @@ def evaluate_success_rate(
             # así que lo inferimos desde info["success"] que tú retornas.
             if done[0]:
                 info = infos[0]
-                print("infoooooo: ", info)
+                # print("infoooooo: ", info)
                 success = bool(info.get("success", False))
                 success_flags.append(success)
 
@@ -525,20 +525,20 @@ if __name__ == "__main__":
     # Final training inputs
     TRAIN_EVAL_FREQ = 20_000
     TRAIN_EVAL_EPISODES = 5
-    FINAL_TIMESTEPS = 300_000
-    FINAL_EVAL_EPISODES = 50
+    FINAL_TIMESTEPS = 900_000
+    FINAL_EVAL_EPISODES = 100
 
     # Env inputs
     SEED = 123
     MAX_STEPS = 400
     GRANULARITY = 40
-    TIME_STEP = 1.0
+    TIME_STEP = 0.1
 
     # I/O
     DEVICE = "cuda"  # o "auto"
     LOG_DIR = "logs_dqn"
     SAVE_LAST = "models/dqn_last.zip"
-    RESULTS_PATH = "models/dqn_results.json"
+    RESULTS_PATH = "models/dqn_results2.json"
 
     # Network size
     policy_kwargs = dict(net_arch=[256, 256])
@@ -575,7 +575,7 @@ if __name__ == "__main__":
         print(f"[1] Optuna done in {elapsed:.1f}s")
         print("[1] Best params:", best_params, "\n")
     else:
-        best_params = {"learning_rate": 1e-4, "gamma": 0.99, "batch_size": 64, "buffer_size": 100_000}
+        best_params = {"learning_rate": 1e-4, "gamma": 0.99, "batch_size": 128, "buffer_size": 200_000}
         print("[1] Skipping Optuna. Using:", best_params, "\n")
 
     # 2) Final training with auto-best-save

@@ -38,7 +38,7 @@ class CubeSatDetumblingEnv(gym.Env):
 
     metadata = {'render_modes': ['human', 'none']}
 
-    def __init__(self, render_mode=None, max_steps=400, start_time=datetime.now(), time_step=0.1, granularity=40, debug=False, num_bins=4, plot_hist=False):
+    def __init__(self, render_mode=None, max_steps=10, start_time=datetime.now(), time_step=0.1, granularity=40, debug=False, num_bins=4, plot_hist=False):
         """
         Inicializar el entorno de CubeSat para el problema de detumbling.
 
@@ -106,47 +106,40 @@ class CubeSatDetumblingEnv(gym.Env):
     
     def create_action_map_xyz(self):
         """
-        Crear el action_map para los tres ejes X, Y y Z usando discretización logarítmica.
-        Más bins cerca de cero para control fino.
+        Acciones discretas: torque 0 y +/- {T, T/2, T/4, T/8} en cada eje (una por vez).
+        Total acciones: 1 + 3*(2*4) = 25
         """
         action_map = {}
-
-        min_torque = self.max_torque
-        max_torque = self.max_torque
-
-        # Crear bins logarítmicos para un solo eje
-        positive_bins = np.linspace(min_torque, max_torque, self.num_bins // 4)
-        negative_bins = -positive_bins[::-1]  # los negativos
-
-        positive_bins_z = np.linspace(max_torque / 8, max_torque, self.num_bins // 2)
-        negative_bins_z = -positive_bins_z[::-1]  # los negativos
-
-        # Incluimos el cero
-        axis_bins = np.concatenate([negative_bins, positive_bins])
-        axis_bins_z = np.concatenate([negative_bins_z, positive_bins_z])
-
-        # print(axis_bins)
-
-        # Crear todas las combinaciones posibles de X, Y y Z
         index = 0
 
-        for tx in axis_bins:
-            action_map[index] = np.array([tx, 0, 0])
-            # print(action_map[index])
-            index += 1
-        
-        for ty in axis_bins:
-            action_map[index] = np.array([0, ty, 0])
-            # print(action_map[index])
-            index += 1
+        T = float(self.max_torque)
 
-        for tz in axis_bins_z:
-            action_map[index] = np.array([0, 0, tz])
-            # print(action_map[index])
-            index += 1
+        # niveles de magnitud (fine control cerca de 0)
+        mags = np.array([T, T/2, T/4, T/8, T/16], dtype=np.float32)
 
+        # 0 torque
+        action_map[index] = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        index += 1
+
+        # X axis
+        for m in mags:
+            action_map[index] = np.array([+m, 0.0, 0.0], dtype=np.float32); index += 1
+            action_map[index] = np.array([-m, 0.0, 0.0], dtype=np.float32); index += 1
+
+        # Y axis
+        for m in mags:
+            action_map[index] = np.array([0.0, +m, 0.0], dtype=np.float32); index += 1
+            action_map[index] = np.array([0.0, -m, 0.0], dtype=np.float32); index += 1
+
+        # Z axis
+        for m in mags:
+            action_map[index] = np.array([0.0, 0.0, +m], dtype=np.float32); index += 1
+            action_map[index] = np.array([0.0, 0.0, -m], dtype=np.float32); index += 1
+            
         # print(action_map)
+
         return action_map
+
 
 
     def _create_simulators(self):
@@ -398,36 +391,45 @@ class CubeSatDetumblingEnv(gym.Env):
 
     def _calculate_reward(self, action, previous_angular_vel_norm):
         """
-        Función de recompensa simplificada con reward shaping.
-        
-        Args:
-            action: Acción aplicada (torque)
-            previous_angular_vel_norm: Norma de velocidad angular del paso anterior
+        Reward: combina
+        - objetivo: minimizar ||ω||
+        - shaping: premiar mejora (disminución de ||ω||)
+        - control: penalizar torque, más fuerte cuando ya estás cerca
+        - precisión: pequeño bonus continuo cuando estás en régimen fino
+        - éxito: bonus grande al cruzar el umbral
         """
         try:
-            current_angular_vel = self.rotation_sim.angular_velocity
-            angular_vel_norm = np.linalg.norm(current_angular_vel)
+            angular_vel_norm = float(np.linalg.norm(self.rotation_sim.angular_velocity))
         except Exception:
             angular_vel_norm = 1.0
-        
-        control_effort = np.linalg.norm(action)
-        
-        # Recompensa base: exponencial negativa (más sensible a cambios pequeños)
-        # base_reward = -np.exp(angular_vel_norm) + 1.0
-        
-        # Reward shaping: premiar mejora gradual
-        improvement = previous_angular_vel_norm - angular_vel_norm
-        # shaped_reward = 10.0 * improvement  # Multiplicador alto para cambios pequeños
-        
-        # Penalización de control reducida
-        control_penalty = -0.01 * control_effort
-        
-        # Bonus por lograr objetivo
-        success_bonus = 10.0 if angular_vel_norm < self.success_threshold else 0.0
-        
-        reward = improvement + control_penalty + success_bonus
-        
-        return reward
+
+        control_effort = float(np.linalg.norm(action))
+
+        # 1) Base: castiga magnitud actual
+        base_reward = -angular_vel_norm
+
+        # 2) Shaping por mejora (si baja ||ω||, positivo)
+        improvement = float(previous_angular_vel_norm - angular_vel_norm)
+        shaped_reward = 10.0 * improvement
+
+        # 3) Penalización de control adaptativa:
+        #    lejos: suave; cerca: fuerte (para evitar sobre-control y oscilación)
+        if angular_vel_norm < 0.2:
+            control_penalty = -0.05 * control_effort
+        else:
+            control_penalty = -0.01 * control_effort
+
+        # 4) Bonus de precisión (continuo): empuja a seguir bajando en zona fina
+        precision_bonus = 0.0
+        if angular_vel_norm < 0.1:
+            precision_bonus = 1.0 * (0.1 - angular_vel_norm)  # máx 0.1
+
+        # 5) Bonus por éxito (cruzar threshold)
+        success_bonus = 20.0 if angular_vel_norm < self.success_threshold else 0.0
+
+        reward = base_reward + shaped_reward + control_penalty + precision_bonus + success_bonus
+        return float(reward)
+
 
     def render(self):
         """
@@ -748,7 +750,7 @@ if __name__ == "__main__":
 
     """
     # --- Configuración para la Línea Base ---
-    EPISODES_TO_EVALUATE = 100 
+    EPISODES_TO_EVALUATE = 10 
     MAX_STEPS_PER_EPISODE = 400 # Asegúrate de que coincida con la configuración por defecto
     
     print("=" * 60)
