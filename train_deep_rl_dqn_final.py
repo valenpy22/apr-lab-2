@@ -518,13 +518,15 @@ if __name__ == "__main__":
     RUN_OPTUNA = True
 
     # Optuna inputs
-    N_TRIALS = 1
-    OPTUNA_TRAIN_TIMESTEPS = 5
-    OPTUNA_EVAL_EPISODES = 10
+    N_TRIALS = 15
+    OPTUNA_TRAIN_TIMESTEPS = 50_000
+    OPTUNA_EVAL_EPISODES = 5
 
     # Final training inputs
-    FINAL_TIMESTEPS = 15
-    FINAL_EVAL_EPISODES = 10
+    TRAIN_EVAL_FREQ = 20_000
+    TRAIN_EVAL_EPISODES = 5
+    FINAL_TIMESTEPS = 300_000
+    FINAL_EVAL_EPISODES = 50
 
     # Env inputs
     SEED = 123
@@ -589,8 +591,8 @@ if __name__ == "__main__":
         time_step=TIME_STEP,
         policy_kwargs=policy_kwargs,
         device=DEVICE,
-        eval_freq=5,
-        n_eval_episodes=5,
+        eval_freq=TRAIN_EVAL_FREQ,
+        n_eval_episodes=TRAIN_EVAL_EPISODES,
     )
     print(f"[2] Best model: {best_model_path}")
     print(f"[2] Last model: {last_model_path}\n")
@@ -600,7 +602,7 @@ if __name__ == "__main__":
 
     eval_metrics = evaluate_with_history(
         best_model_path,
-        n_eval_episodes=1,
+        n_eval_episodes=FINAL_EVAL_EPISODES,
         seed=999,
         max_steps=MAX_STEPS,
         granularity=GRANULARITY,
@@ -625,8 +627,8 @@ if __name__ == "__main__":
         },
         "final_training": {
             "timesteps": FINAL_TIMESTEPS,
-            "eval_freq": 5,
-            "n_eval_episodes_during_train": 5,
+            "eval_freq": TRAIN_EVAL_FREQ,
+            "n_eval_episodes_during_train": TRAIN_EVAL_EPISODES,
             "policy_kwargs": policy_kwargs,
         },
         "best_params": best_params,
