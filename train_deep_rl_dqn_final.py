@@ -254,7 +254,7 @@ def train_dqn_with_params(
     )])
 
     stop_cb = StopTrainingOnNoModelImprovement(
-        max_no_improvement_evals=10,
+        max_no_improvement_evals=15,
         min_evals=5,
         verbose=1
     )

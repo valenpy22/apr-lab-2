@@ -409,7 +409,7 @@ class CubeSatDetumblingEnv(gym.Env):
         base_reward = -angular_vel_norm
 
         # 2) Shaping por mejora (si baja ||ω||, positivo)
-        improvement = float(previous_angular_vel_norm - angular_vel_norm)
+        improvement = previous_angular_vel_norm - angular_vel_norm
         shaped_reward = 10.0 * improvement
 
         # 3) Penalización de control adaptativa:
@@ -420,14 +420,14 @@ class CubeSatDetumblingEnv(gym.Env):
             control_penalty = -0.01 * control_effort
 
         # 4) Bonus de precisión (continuo): empuja a seguir bajando en zona fina
-        precision_bonus = 0.0
-        if angular_vel_norm < 0.1:
-            precision_bonus = 1.0 * (0.1 - angular_vel_norm)  # máx 0.1
+        # precision_bonus = 0.0
+        # if angular_vel_norm < 0.1:
+        #     precision_bonus = 1.0 * (0.1 - angular_vel_norm)  # máx 0.1
 
         # 5) Bonus por éxito (cruzar threshold)
-        success_bonus = 20.0 if angular_vel_norm < self.success_threshold else 0.0
+        success_bonus = 50.0 if angular_vel_norm < self.success_threshold else 0.0
 
-        reward = base_reward + shaped_reward + control_penalty + precision_bonus + success_bonus
+        reward = base_reward + shaped_reward + control_penalty + success_bonus
         return float(reward)
 
 
