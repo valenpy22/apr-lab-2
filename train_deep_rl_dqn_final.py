@@ -226,6 +226,7 @@ def train_dqn_with_params(
     best_params: dict,
     total_timesteps: int = 300_000,
     seed: int = 123,
+    best_dir: str = "best_model",
     log_dir: str = "logs_dqn",
     save_path_last: str = "models/dqn_last.zip",
     max_steps: int = 400,
@@ -253,12 +254,12 @@ def train_dqn_with_params(
     )])
 
     stop_cb = StopTrainingOnNoModelImprovement(
-        max_no_improvement_evals=6,
+        max_no_improvement_evals=10,
         min_evals=5,
         verbose=1
     )
 
-    best_dir = os.path.join(log_dir, "best")
+    best_dir = os.path.join(best_dir)
     eval_dir = os.path.join(log_dir, "eval")
     os.makedirs(best_dir, exist_ok=True)
     os.makedirs(eval_dir, exist_ok=True)
@@ -266,7 +267,7 @@ def train_dqn_with_params(
     eval_cb = EvalCallback(
         eval_env,
         best_model_save_path=best_dir,
-        log_path=eval_dir,
+        log_path=os.path.join(log_dir, "eval"),
         eval_freq=eval_freq,
         n_eval_episodes=n_eval_episodes,
         deterministic=True,
@@ -295,7 +296,7 @@ def train_dqn_with_params(
     model.learn(total_timesteps=total_timesteps, callback=eval_cb, progress_bar=True)
 
     model.save(save_path_last)
-    best_model_path = os.path.join(best_dir, "best_model2")
+    best_model_path = os.path.join(best_dir, "best_model")
 
     eval_env.close()
     train_env.close()
@@ -496,6 +497,30 @@ def evaluate_success_rate(
     return metrics
 
 
+def make_run_dirs(base_dir: str = "runs", exp_name: str = "dqn_cubesat", seed: int = 123):
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join(base_dir, exp_name, f"seed_{seed}", run_id)
+
+    paths = {
+        "run_dir": run_dir,
+        "log_dir": os.path.join(run_dir, "logs"),          # tensorboard + monitor
+        "best_dir": os.path.join(run_dir, "best"),         # EvalCallback guarda best_model.zip aquí
+        "models_dir": os.path.join(run_dir, "models"),     # last model, etc.
+        "plots_dir": os.path.join(run_dir, "plots"),
+        "results_path": os.path.join(run_dir, "dqn_results.json"),
+    }
+
+    for p in paths.values():
+        # results_path es archivo, no carpeta
+        if p.endswith(".json"):
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+        else:
+            os.makedirs(p, exist_ok=True)
+
+    return paths
+
+
+
 def numpy_json_default(obj):
     # Arrays -> listas
     if isinstance(obj, np.ndarray):
@@ -523,10 +548,11 @@ if __name__ == "__main__":
     OPTUNA_EVAL_EPISODES = 5
 
     # Final training inputs
-    TRAIN_EVAL_FREQ = 20_000
-    TRAIN_EVAL_EPISODES = 5
+    EVAL_FREQ = 20_000
+    N_EVAL_EPISODES = 5
+    
     FINAL_TIMESTEPS = 900_000
-    FINAL_EVAL_EPISODES = 100
+    FINAL_EVAL_EPISODES = 50
 
     # Env inputs
     SEED = 123
@@ -536,9 +562,13 @@ if __name__ == "__main__":
 
     # I/O
     DEVICE = "cuda"  # o "auto"
-    LOG_DIR = "logs_dqn"
-    SAVE_LAST = "models/dqn_last.zip"
-    RESULTS_PATH = "models/dqn_results2.json"
+    
+    paths = make_run_dirs(base_dir="runs", exp_name="dqn_cubesat", seed=SEED)
+    LOG_DIR = paths["log_dir"]
+    BEST_DIR = paths["best_dir"]
+    SAVE_LAST = os.path.join(paths["models_dir"], "dqn_last.zip")
+    RESULTS_PATH = paths["results_path"]
+    PLOTS_DIR = paths["plots_dir"]
 
     # Network size
     policy_kwargs = dict(net_arch=[256, 256])
@@ -585,14 +615,15 @@ if __name__ == "__main__":
         total_timesteps=FINAL_TIMESTEPS,
         seed=SEED,
         log_dir=LOG_DIR,
+        best_dir=BEST_DIR,
         save_path_last=SAVE_LAST,
         max_steps=MAX_STEPS,
         granularity=GRANULARITY,
         time_step=TIME_STEP,
         policy_kwargs=policy_kwargs,
         device=DEVICE,
-        eval_freq=TRAIN_EVAL_FREQ,
-        n_eval_episodes=TRAIN_EVAL_EPISODES,
+        eval_freq=EVAL_FREQ,
+        n_eval_episodes=N_EVAL_EPISODES,
     )
     print(f"[2] Best model: {best_model_path}")
     print(f"[2] Last model: {last_model_path}\n")
@@ -613,7 +644,7 @@ if __name__ == "__main__":
     print(f"[3] Mean reward: {eval_metrics['rewards'].mean():.2f} ± {eval_metrics['rewards'].std():.2f}")
     print(f"[3] Mean final ||ω||: {np.nanmean(eval_metrics['final_w_norm']):.4f}")
 
-    plot_eval_history(eval_metrics, window=10, save_dir="plots", prefix="best_model_eval")
+    plot_eval_history(eval_metrics, window=10, save_dir=PLOTS_DIR, prefix="best_model_eval")
     # 4) Save summary
     results = {
         "timestamp": datetime.now().isoformat(),
@@ -627,17 +658,12 @@ if __name__ == "__main__":
         },
         "final_training": {
             "timesteps": FINAL_TIMESTEPS,
-            "eval_freq": TRAIN_EVAL_FREQ,
-            "n_eval_episodes_during_train": TRAIN_EVAL_EPISODES,
+            "eval_freq": EVAL_FREQ,
+            "n_eval_episodes_during_train": N_EVAL_EPISODES,
             "policy_kwargs": policy_kwargs,
         },
         "best_params": best_params,
         "final_eval": eval_metrics,
-        "plots": {
-            "reward": "plots/best_model_eval_reward.png",
-            "success_rate": "plots/best_model_eval_success_rate.png",
-            "final_omega_norm": "plots/best_model_eval_final_omega_norm.png",    
-        },
         "paths": {
             "best_model": best_model_path,
             "last_model": last_model_path,
