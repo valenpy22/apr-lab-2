@@ -1,0 +1,51 @@
+{
+  "model_path": "/home/mapacheroja/apr-lab-2/20260107_063620/best/best_model.zip",
+  "base_seed": 123,
+  "n_eval_episodes": 100,
+  "max_steps": 400,
+  "time_step": 0.1,
+  "granularities": [
+    20,
+    40,
+    60,
+    80
+  ],
+  "metrics": [
+    {
+      "granularity": 20,
+      "success_rate": 0.88,
+      "mean_reward": -27.810288477715876,
+      "std_reward": 130.472775547949,
+      "mean_final_w_norm": 0.08868656903576536,
+      "std_final_w_norm": 0.2923011114612041,
+      "mean_steps_to_success": 100.23863636363636
+    },
+    {
+      "granularity": 40,
+      "success_rate": 0.91,
+      "mean_reward": -29.611185593318442,
+      "std_reward": 147.34347786069776,
+      "mean_final_w_norm": 0.10916543991624249,
+      "std_final_w_norm": 0.4259186172790691,
+      "mean_steps_to_success": 98.95604395604396
+    },
+    {
+      "granularity": 60,
+      "success_rate": 0.86,
+      "mean_reward": -43.554921471941526,
+      "std_reward": 172.72441878724072,
+      "mean_final_w_norm": 0.14837210867991024,
+      "std_final_w_norm": 0.4841808552527821,
+      "mean_steps_to_success": 90.34883720930233
+    },
+    {
+      "granularity": 80,
+      "success_rate": 0.91,
+      "mean_reward": -8.29925425741938,
+      "std_reward": 97.09241894901045,
+      "mean_final_w_norm": 0.04514781559308575,
+      "std_final_w_norm": 0.20286356669964203,
+      "mean_steps_to_success": 96.85714285714286
+    }
+  ]
+}

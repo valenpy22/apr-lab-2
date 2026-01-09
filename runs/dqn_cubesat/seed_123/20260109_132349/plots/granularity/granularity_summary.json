@@ -1,0 +1,51 @@
+{
+  "model_path": "/home/mapacheroja/apr-lab-2/20260107_063620/best/best_model.zip",
+  "base_seed": 123,
+  "n_eval_episodes": 30,
+  "max_steps": 400,
+  "time_step": 0.1,
+  "granularities": [
+    20,
+    40,
+    60,
+    80
+  ],
+  "metrics": [
+    {
+      "granularity": 20,
+      "success_rate": 0.9333333333333333,
+      "mean_reward": -6.845640258799419,
+      "std_reward": 90.20372744648564,
+      "mean_final_w_norm": 0.04328983789175815,
+      "std_final_w_norm": 0.14610700206793334,
+      "mean_steps_to_success": 95.75
+    },
+    {
+      "granularity": 40,
+      "success_rate": 0.8333333333333334,
+      "mean_reward": -59.29364610405973,
+      "std_reward": 207.34852678401668,
+      "mean_final_w_norm": 0.23721370124193317,
+      "std_final_w_norm": 0.680636608697122,
+      "mean_steps_to_success": 91.48
+    },
+    {
+      "granularity": 60,
+      "success_rate": 0.9333333333333333,
+      "mean_reward": -22.02075674506341,
+      "std_reward": 128.7425338527087,
+      "mean_final_w_norm": 0.08807713148009895,
+      "std_final_w_norm": 0.3011101051507592,
+      "mean_steps_to_success": 94.64285714285714
+    },
+    {
+      "granularity": 80,
+      "success_rate": 0.9333333333333333,
+      "mean_reward": -8.261241217573115,
+      "std_reward": 96.81272277746308,
+      "mean_final_w_norm": 0.0486667817164776,
+      "std_final_w_norm": 0.22317413275947645,
+      "mean_steps_to_success": 99.60714285714286
+    }
+  ]
+}

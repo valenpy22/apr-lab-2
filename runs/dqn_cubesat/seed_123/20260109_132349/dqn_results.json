@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-01-09T13:31:56.334131",
+  "seed": 123,
+  "device": "cuda",
+  "optuna": {
+    "run": true,
+    "n_trials": 15,
+    "train_timesteps": 50000,
+    "eval_episodes": 5
+  }
+}

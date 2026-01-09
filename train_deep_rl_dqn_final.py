@@ -3,9 +3,10 @@ import json
 import time
 import gc
 from datetime import datetime
+import pandas as pd
 
 import numpy as np
-import optuna
+#import optuna
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,6 +18,24 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.utils import set_random_seed
+
+# ==== HOTFIX FECHA 2026 ====
+import datetime as _dt
+
+_real_datetime = _dt.datetime
+
+class FixedDatetime(_real_datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return _real_datetime(2025, 1, 1)
+
+    @classmethod
+    def utcnow(cls):
+        return _real_datetime(2025, 1, 1)
+
+_dt.datetime = FixedDatetime
+# ==========================
+
 
 from cubesat_detumbling_rl import CubeSatDetumblingEnv
 
@@ -31,6 +50,7 @@ def make_env(max_steps=400, granularity=40, time_step=0.1, seed=0, log_dir=None)
             max_steps=max_steps,
             granularity=granularity,
             time_step=time_step,
+            start_time=datetime(2025, 1, 1),
             debug=False,
             plot_hist=False
         )
@@ -58,16 +78,23 @@ def evaluate_with_history(
     Corre evaluación y retorna un dict con historiales por episodio.
     Compatible con DummyVecEnv (1 env).
     """
-    # Normaliza: SB3 acepta path sin .zip
-    if model_path.endswith(".zip"):
-        model_path = model_path[:-4]
+
+    model_path = os.path.abspath(model_path)
+
+    if not model_path.endswith(".zip") and os.path.isfile(model_path + ".zip"):
+        model_path += ".zip"
+
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(f"El modelo no fue encontrado en {model_path}")
+
+    load_path = model_path[:-4] if model_path.endswith(".zip") else model_path
 
     eval_env = DummyVecEnv([make_env(
         max_steps=max_steps, granularity=granularity, time_step=time_step,
         seed=seed, log_dir=None
     )])
 
-    model = DQN.load(model_path)
+    model = DQN.load(load_path)
 
     rewards = []
     success = []
@@ -76,7 +103,10 @@ def evaluate_with_history(
     final_w_norm = []
     steps_to_success = []
 
+    t_eval_start = time.time()
+
     for ep in range(n_eval_episodes):
+        ep_start = time.time()
         obs = eval_env.reset()
         done = [False]
         ep_reward = 0.0
@@ -91,6 +121,9 @@ def evaluate_with_history(
             steps += 1
             last_info = infos[0]  # info del único env
 
+        ep_time = time.time() - ep_start
+        print(f"[EVAL] Episode {ep+1}/{n_eval_episodes} "
+              f"steps={steps} time={ep_time:.2f}s")
         # Al terminar el episodio, last_info trae tu info + monitor
         s = bool(last_info.get("success", False))
         w = float(last_info.get("angular_velocity_norm", np.nan))
@@ -111,6 +144,10 @@ def evaluate_with_history(
 
     eval_env.close()
 
+    total_time = time.time() - t_eval_start
+    print(f"[EVAL] TOTAL TIME: {total_time:.2f}s "
+          f"(avg {total_time/n_eval_episodes:.2f}s/episode)")
+
     history = {
         "rewards": np.array(rewards, dtype=float),
         "success": np.array(success, dtype=bool),
@@ -123,18 +160,15 @@ def evaluate_with_history(
     }
     return history
 
-
-def plot_eval_history(history: dict, window: int = 10, save_dir: str | None = None, prefix: str = "eval"):
-    """
-    Genera 4 gráficas:
-      1) Recompensa por episodio + media móvil
-      2) Tasa de éxito acumulada
-      3) Norma final de velocidad angular por episodio
-      4) Histograma de pasos al éxito (si hubo éxitos)
-    """
+def plot_eval_history_scatter(
+    history: dict,
+    save_dir: str | None = None,
+    prefix: str = "eval"
+):
     rewards = history["rewards"]
     success = history["success"]
     wnorm = history["final_w_norm"]
+    steps_to_success = history["steps_to_success"]
     n = history["n_eval_episodes"]
 
     episodes = np.arange(1, n + 1)
@@ -142,46 +176,47 @@ def plot_eval_history(history: dict, window: int = 10, save_dir: str | None = No
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
 
-    # ---- 1) Reward por episodio + moving average ----
+    # =========================
+    # 1) Reward por episodio (scatter)
+    # =========================
     plt.figure()
-    plt.plot(episodes, rewards, label="Reward por episodio")
-    if n >= window:
-        ma = np.convolve(rewards, np.ones(window) / window, mode="valid")
-        plt.plot(np.arange(window, n + 1), ma, label=f"Media móvil ({window})")
+    plt.scatter(episodes, rewards, alpha=0.7)
     plt.xlabel("Episodio")
     plt.ylabel("Reward")
     plt.title("Evaluación: Reward por episodio")
     plt.grid(True)
-    plt.legend()
     if save_dir:
-        plt.savefig(os.path.join(save_dir, f"{prefix}_reward.png"), dpi=200, bbox_inches="tight")
+        plt.savefig(os.path.join(save_dir, f"{prefix}_reward_scatter.png"), dpi=200, bbox_inches="tight")
 
-    # ---- 2) Success rate acumulada ----
+    # =========================
+    # 2) Success rate acumulada (línea, se deja)
+    # =========================
     plt.figure()
     success_cum = np.cumsum(success.astype(int)) / episodes
-    plt.plot(episodes, success_cum, label="Tasa de éxito acumulada")
+    plt.plot(episodes, success_cum)
     plt.xlabel("Episodio")
     plt.ylabel("Success rate")
     plt.title(f"Evaluación: Success rate acumulada (final={success_cum[-1]*100:.2f}%)")
     plt.ylim(0, 1.05)
     plt.grid(True)
-    plt.legend()
     if save_dir:
         plt.savefig(os.path.join(save_dir, f"{prefix}_success_rate.png"), dpi=200, bbox_inches="tight")
 
-    # ---- 3) Norma final de velocidad angular ----
+    # =========================
+    # 3) Norma final de velocidad angular (scatter)
+    # =========================
     plt.figure()
-    plt.plot(episodes, wnorm, label="||ω|| final")
+    plt.scatter(episodes, wnorm, alpha=0.7)
     plt.xlabel("Episodio")
-    plt.ylabel("||ω|| (rad/s)")
+    plt.ylabel("||ω|| final [rad/s]")
     plt.title("Evaluación: Norma final de velocidad angular")
     plt.grid(True)
-    plt.legend()
     if save_dir:
-        plt.savefig(os.path.join(save_dir, f"{prefix}_final_omega_norm.png"), dpi=200, bbox_inches="tight")
+        plt.savefig(os.path.join(save_dir, f"{prefix}_final_omega_norm_scatter.png"), dpi=200, bbox_inches="tight")
 
-    # ---- 4) Histograma pasos al éxito ----
-    steps_to_success = history["steps_to_success"]
+    # =========================
+    # 4) Histograma pasos al éxito (se mantiene)
+    # =========================
     if len(steps_to_success) > 0:
         plt.figure()
         plt.hist(steps_to_success, bins=15)
@@ -191,11 +226,241 @@ def plot_eval_history(history: dict, window: int = 10, save_dir: str | None = No
         plt.grid(True)
         if save_dir:
             plt.savefig(os.path.join(save_dir, f"{prefix}_steps_to_success_hist.png"), dpi=200, bbox_inches="tight")
-    else:
-        print("⚠️ No hubo éxitos en la evaluación; no se grafica histograma de pasos al éxito.")
 
     plt.close("all")
 
+
+def plot_training_monitor(
+    monitor_csv_path: str,
+    window: int = 50,
+    save_dir: str | None = None,
+    prefix: str = "training",
+):
+    """
+    Lee monitor.csv de Stable-Baselines3 y grafica:
+      1) Reward por episodio + media móvil
+      2) Largo del episodio
+      3) Reward vs tiempo de entrenamiento
+
+    Parameters
+    ----------
+    monitor_csv_path : str
+        Ruta al archivo monitor.csv
+    window : int
+        Ventana para media móvil del reward
+    save_dir : str | None
+        Carpeta donde guardar las figuras (si None, solo muestra)
+    prefix : str
+        Prefijo de los nombres de archivos
+    """
+
+    if not os.path.isfile(monitor_csv_path):
+        raise FileNotFoundError(f"No existe: {monitor_csv_path}")
+
+    # ---- Leer CSV ignorando comentarios ----
+    df = pd.read_csv(
+        monitor_csv_path,
+        comment="#"
+    )
+
+    # Asegura columnas correctas
+    assert {"r", "l", "t"}.issubset(df.columns), df.columns
+
+    rewards = df["r"].to_numpy()
+    lengths = df["l"].to_numpy()
+    times = df["t"].to_numpy()
+
+    episodes = np.arange(1, len(rewards) + 1)
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+
+    # =========================
+    # 1) Reward por episodio
+    # =========================
+    plt.figure()
+    plt.plot(episodes, rewards, alpha=0.4, label="Reward por episodio")
+
+    if len(rewards) >= window:
+        ma = np.convolve(rewards, np.ones(window) / window, mode="valid")
+        plt.plot(
+            np.arange(window, len(rewards) + 1),
+            ma,
+            linewidth=2,
+            label=f"Media móvil ({window})"
+        )
+
+    plt.xlabel("Episodio")
+    plt.ylabel("Reward")
+    plt.title("Entrenamiento: Reward por episodio")
+    plt.grid(True)
+    plt.legend()
+
+    if save_dir:
+        plt.savefig(
+            os.path.join(save_dir, f"{prefix}_reward.png"),
+            dpi=200,
+            bbox_inches="tight"
+        )
+
+    # =========================
+    # 2) Largo del episodio
+    # =========================
+    plt.figure()
+    plt.plot(episodes, lengths)
+    plt.xlabel("Episodio")
+    plt.ylabel("Steps")
+    plt.title("Entrenamiento: Largo del episodio")
+    plt.grid(True)
+
+    if save_dir:
+        plt.savefig(
+            os.path.join(save_dir, f"{prefix}_episode_length.png"),
+            dpi=200,
+            bbox_inches="tight"
+        )
+
+    # =========================
+    # 3) Reward vs tiempo
+    # =========================
+    plt.figure()
+    plt.plot(times / 60.0, rewards, alpha=0.5)
+    plt.xlabel("Tiempo de entrenamiento [min]")
+    plt.ylabel("Reward")
+    plt.title("Entrenamiento: Reward vs tiempo")
+    plt.grid(True)
+
+    if save_dir:
+        plt.savefig(
+            os.path.join(save_dir, f"{prefix}_reward_vs_time.png"),
+            dpi=200,
+            bbox_inches="tight"
+        )
+
+    plt.close("all")
+
+import json
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+def plot_final_eval_from_json(
+    json_path: str,
+    save_dir: str | None = None,
+    prefix: str = "final_eval"
+):
+    """
+    Genera gráficos a partir del campo `final_eval`
+    del dqn_results.json
+    """
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    eval_data = data["final_eval"]
+
+    rewards = np.array(eval_data["rewards"])
+    success = np.array(eval_data["success"], dtype=int)
+    lengths = np.array(eval_data["lengths"])
+    wnorm = np.array(eval_data["final_w_norm"])
+    steps_success = np.array(eval_data["steps_to_success"])
+    n = eval_data["n_eval_episodes"]
+
+    episodes = np.arange(1, n + 1)
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+
+    # =========================
+    # 1) Reward por episodio
+    # =========================
+    plt.figure()
+    plt.plot(episodes, rewards)
+    plt.xlabel("Episodio")
+    plt.ylabel("Reward")
+    plt.title("Evaluación final: Reward por episodio")
+    plt.grid(True)
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, f"{prefix}_reward.png"), dpi=200, bbox_inches="tight")
+
+    # =========================
+    # 2) Success rate acumulada
+    # =========================
+    plt.figure()
+    success_cum = np.cumsum(success) / episodes
+    plt.plot(episodes, success_cum)
+    plt.ylim(0, 1.05)
+    plt.xlabel("Episodio")
+    plt.ylabel("Success rate")
+    plt.title(f"Evaluación final: Success rate acumulada ({success_cum[-1]*100:.1f}%)")
+    plt.grid(True)
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, f"{prefix}_success_rate.png"), dpi=200, bbox_inches="tight")
+
+    # =========================
+    # 3) Norma final de velocidad angular
+    # =========================
+    plt.figure()
+    plt.plot(episodes, wnorm)
+    plt.xlabel("Episodio")
+    plt.ylabel("||ω|| final [rad/s]")
+    plt.title("Evaluación final: Norma de velocidad angular")
+    plt.grid(True)
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, f"{prefix}_final_omega_norm.png"), dpi=200, bbox_inches="tight")
+
+    # =========================
+    # 4) Histograma pasos al éxito
+    # =========================
+    if len(steps_success) > 0:
+        plt.figure()
+        plt.hist(steps_success, bins=15)
+        plt.xlabel("Pasos al éxito")
+        plt.ylabel("Frecuencia")
+        plt.title("Evaluación final: Distribución de pasos al éxito")
+        plt.grid(True)
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, f"{prefix}_steps_to_success.png"), dpi=200, bbox_inches="tight")
+
+    plt.close("all")
+
+def plot_granularity_comparison(metrics: list[dict], save_dir: str):
+    os.makedirs(save_dir, exist_ok=True)
+
+    g = [m["granularity"] for m in metrics]
+    success = [m["success_rate"] for m in metrics]
+    wnorm = [m["mean_final_w_norm"] for m in metrics]
+    steps = [m["mean_steps_to_success"] for m in metrics]
+
+    # ---- Success rate vs granularidad ----
+    plt.figure()
+    plt.plot(g, success, marker="o")
+    plt.xlabel("Granularidad")
+    plt.ylabel("Success rate")
+    plt.title("Success rate vs granularidad")
+    plt.grid(True)
+    plt.savefig(os.path.join(save_dir, "granularity_vs_success.png"), dpi=200)
+
+    # ---- ||ω|| final vs granularidad ----
+    plt.figure()
+    plt.plot(g, wnorm, marker="o")
+    plt.xlabel("Granularidad")
+    plt.ylabel("||ω|| final medio [rad/s]")
+    plt.title("Norma final de velocidad angular vs granularidad")
+    plt.grid(True)
+    plt.savefig(os.path.join(save_dir, "granularity_vs_w_norm.png"), dpi=200)
+
+    # ---- Pasos al éxito vs granularidad ----
+    plt.figure()
+    plt.plot(g, steps, marker="o")
+    plt.xlabel("Granularidad")
+    plt.ylabel("Pasos medios al éxito")
+    plt.title("Eficiencia vs granularidad")
+    plt.grid(True)
+    plt.savefig(os.path.join(save_dir, "granularity_vs_steps.png"), dpi=200)
+
+    plt.close("all")
 
 
 # =========================
@@ -305,6 +570,93 @@ def train_dqn_with_params(
 
     return best_model_path, save_path_last
 
+def evaluate_for_granularity(
+    model_path: str,
+    granularity: int,
+    n_eval_episodes: int,
+    seed: int,
+    max_steps: int,
+    time_step: float,
+):
+    print(f"\n[GRAN] Evaluating granularity={granularity}")
+
+    history = evaluate_with_history(
+        model_path=model_path,
+        n_eval_episodes=n_eval_episodes,
+        seed=seed,
+        max_steps=max_steps,
+        granularity=granularity,
+        time_step=time_step,
+    )
+
+    metrics = {
+        "granularity": granularity,
+        "success_rate": float(history["success_rate"]),
+        "mean_reward": float(np.mean(history["rewards"])),
+        "std_reward": float(np.std(history["rewards"])),
+        "mean_final_w_norm": float(np.nanmean(history["final_w_norm"])),
+        "std_final_w_norm": float(np.nanstd(history["final_w_norm"])),
+        "mean_steps_to_success": (
+            float(np.mean(history["steps_to_success"]))
+            if len(history["steps_to_success"]) > 0 else np.nan
+        ),
+    }
+
+    return metrics, history
+
+def run_granularity_sweep(
+    model_path: str,
+    granularities: list[int],
+    n_eval_episodes: int,
+    seed: int,
+    max_steps: int,
+    time_step: float,
+    save_dir: str,
+):
+    os.makedirs(save_dir, exist_ok=True)
+
+    all_metrics = []
+    all_histories = {}
+
+    for g in granularities:
+        gran_seed = seed + g
+        metrics, history = evaluate_for_granularity(
+            model_path=model_path,
+            granularity=g,
+            n_eval_episodes=n_eval_episodes,
+            seed=gran_seed,
+            max_steps=max_steps,
+            time_step=time_step,
+        )
+
+        all_metrics.append(metrics)
+        all_histories[g] = history
+
+        # plots individuales por granularidad
+        plot_eval_history_scatter(
+            history, save_dir=save_dir, prefix=f"gran_{g}"
+        )
+
+    # Guardar resultados numéricos
+    summary = {
+        "model_path": model_path,
+        "base_seed": seed,
+        "n_eval_episodes": n_eval_episodes,
+        "max_steps": max_steps,
+        "time_step": time_step,
+        "granularities": granularities,
+        "metrics": all_metrics,
+    }
+
+    results_path = os.path.join(save_dir, "granularity_summary.json")
+    with open(results_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+
+    print(f"\n[GRAN] Results saved to {results_path}")
+
+    return all_metrics, all_histories
+
 
 # =========================
 # Optuna: objective builder (closure)
@@ -370,6 +722,7 @@ def make_objective(
 # =========================
 # Optuna runner (n_trials as input)
 # =========================
+"""
 def run_optuna(
     n_trials: int,
     device: str = "cuda",
@@ -414,7 +767,7 @@ def run_optuna(
     elapsed = time.time() - start
 
     return study, elapsed
-
+"""
 
 import numpy as np
 from stable_baselines3 import DQN
@@ -552,7 +905,7 @@ if __name__ == "__main__":
     N_EVAL_EPISODES = 5
     
     FINAL_TIMESTEPS = 900_000
-    FINAL_EVAL_EPISODES = 50
+    FINAL_EVAL_EPISODES = 100
 
     # Env inputs
     SEED = 123
@@ -573,6 +926,7 @@ if __name__ == "__main__":
     # Network size
     policy_kwargs = dict(net_arch=[256, 256])
 
+    """
     # 0) Sanity check env
     print("\n[0] check_env...")
     tmp = CubeSatDetumblingEnv(render_mode=None, debug=False, plot_hist=False,
@@ -628,9 +982,13 @@ if __name__ == "__main__":
     print(f"[2] Best model: {best_model_path}")
     print(f"[2] Last model: {last_model_path}\n")
 
+    
     # 3) Evaluate best model
     print("[3] Evaluating best model (with success rate + plots)...")
 
+    best_model_path = "/home/mapacheroja/apr-lab-2/20260107_063620/best/best_model.zip"
+
+    print("Evaluating...")
     eval_metrics = evaluate_with_history(
         best_model_path,
         n_eval_episodes=FINAL_EVAL_EPISODES,
@@ -639,12 +997,13 @@ if __name__ == "__main__":
         granularity=GRANULARITY,
         time_step=TIME_STEP
     )
+    print("Evaluating done.")
 
     print(f"[3] Success rate: {eval_metrics['success_rate']*100:.2f}%")
     print(f"[3] Mean reward: {eval_metrics['rewards'].mean():.2f} ± {eval_metrics['rewards'].std():.2f}")
     print(f"[3] Mean final ||ω||: {np.nanmean(eval_metrics['final_w_norm']):.4f}")
 
-    plot_eval_history(eval_metrics, window=10, save_dir=PLOTS_DIR, prefix="best_model_eval")
+    plot_eval_history_scatter(eval_metrics, save_dir=PLOTS_DIR, prefix="best_model_eval")
     # 4) Save summary
     results = {
         "timestamp": datetime.now().isoformat(),
@@ -656,25 +1015,70 @@ if __name__ == "__main__":
             "train_timesteps": OPTUNA_TRAIN_TIMESTEPS,
             "eval_episodes": OPTUNA_EVAL_EPISODES
         },
-        "final_training": {
-            "timesteps": FINAL_TIMESTEPS,
-            "eval_freq": EVAL_FREQ,
-            "n_eval_episodes_during_train": N_EVAL_EPISODES,
-            "policy_kwargs": policy_kwargs,
-        },
-        "best_params": best_params,
-        "final_eval": eval_metrics,
-        "paths": {
-            "best_model": best_model_path,
-            "last_model": last_model_path,
-            "log_dir": LOG_DIR,
-        },
+        #"final_training": {
+        #    "timesteps": FINAL_TIMESTEPS,
+        #    "eval_freq": EVAL_FREQ,
+        #    "n_eval_episodes_during_train": N_EVAL_EPISODES,
+        #    "policy_kwargs": policy_kwargs,
+        # },
+        # "best_params": best_params,
+        # "final_eval": eval_metrics,
+        # "paths": {
+        #    "best_model": best_model_path,
+        #    "last_model": last_model_path,
+        #    "log_dir": LOG_DIR,
+        #},
     }
+
+    model = DQN.load(best_model_path)
+    print("Model loaded successfully.")
+    print(f"Learning rate: {model.learning_rate}")
+    print(f"Gamma: {model.gamma}")
+    print(f"Batch size: {model.batch_size}")
+    print(f"Buffer size: {model.buffer_size}")
 
     os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
     with open(RESULTS_PATH, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False, default=numpy_json_default)
 
+    monitor_path = "/home/mapacheroja/apr-lab-2/20260107_063620/logs/monitor.csv"
 
-    print(f"[4] Results saved to: {RESULTS_PATH}")
+    plot_training_monitor(
+        monitor_csv_path=monitor_path,
+        window=50,
+        save_dir=PLOTS_DIR,
+        prefix="training"
+    )
+
+    plot_final_eval_from_json(
+        json_path="20260107_063620/dqn_results.json",
+        save_dir=PLOTS_DIR,
+        prefix="final_eval"
+    ) 
+
+    """ 
+    best_model_path = "/home/mapacheroja/apr-lab-2/20260107_063620/best/best_model.zip"
+
+    print("\n[4] Running granularity sweep...")
+
+    GRANULARITIES = [20, 40, 60, 80]
+
+    gran_metrics, gran_histories = run_granularity_sweep(
+        model_path=best_model_path,
+        granularities=GRANULARITIES,
+        n_eval_episodes=100,      # puedes bajar a 30 si quieres rapidez
+        seed=SEED,
+        max_steps=MAX_STEPS,
+        time_step=TIME_STEP,
+        save_dir=os.path.join(PLOTS_DIR, "granularity"),
+    )
+
+    plot_granularity_comparison(
+        gran_metrics,
+        save_dir=os.path.join(PLOTS_DIR, "granularity")
+    )
+
+    print("[4] Granularity sweep done ✅")
+
+    print(f"[5] Results saved to: {RESULTS_PATH}")
     print("Done ✅")
