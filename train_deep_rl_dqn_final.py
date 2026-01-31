@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 
 import numpy as np
-#import optuna
+import optuna
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -43,7 +43,7 @@ from cubesat_detumbling_rl import CubeSatDetumblingEnv
 # =========================
 # Env factory
 # =========================
-def make_env(max_steps=400, granularity=40, time_step=0.1, seed=0, log_dir=None):
+def make_env(max_steps=400, granularity=40, time_step=0.1, seed=0, log_dir=None, shaped_reward_coef=10.0):
     def _init():
         env = CubeSatDetumblingEnv(
             render_mode=None,
@@ -52,7 +52,8 @@ def make_env(max_steps=400, granularity=40, time_step=0.1, seed=0, log_dir=None)
             time_step=time_step,
             start_time=datetime(2025, 1, 1),
             debug=False,
-            plot_hist=False
+            plot_hist=False,
+            shaped_reward_coef=shaped_reward_coef
         )
         env.reset(seed=seed)
 
@@ -73,6 +74,7 @@ def evaluate_with_history(
     max_steps: int = 400,
     granularity: int = 40,
     time_step: float = 1.0,
+    shaped_reward_coef: float = 10.0,
 ):
     """
     Corre evaluación y retorna un dict con historiales por episodio.
@@ -508,14 +510,16 @@ def train_dqn_with_params(
     set_random_seed(seed)
     np.random.seed(seed)
 
+    shaped_reward_coef = best_params.get('shaped_reward_coef', 10.0)
+    
     train_env = DummyVecEnv([make_env(
         max_steps=max_steps, granularity=granularity, time_step=time_step,
-        seed=seed, log_dir=log_dir
+        seed=seed, log_dir=log_dir, shaped_reward_coef=shaped_reward_coef
     )])
 
     eval_env = DummyVecEnv([make_env(
         max_steps=max_steps, granularity=granularity, time_step=time_step,
-        seed=seed + 1, log_dir=None
+        seed=seed, log_dir=None, shaped_reward_coef=shaped_reward_coef
     )])
 
     stop_cb = StopTrainingOnNoModelImprovement(
@@ -577,6 +581,7 @@ def evaluate_for_granularity(
     seed: int,
     max_steps: int,
     time_step: float,
+    shaped_reward_coef: float = 10.0,
 ):
     print(f"\n[GRAN] Evaluating granularity={granularity}")
 
@@ -587,6 +592,7 @@ def evaluate_for_granularity(
         max_steps=max_steps,
         granularity=granularity,
         time_step=time_step,
+        shaped_reward_coef=shaped_reward_coef,
     )
 
     metrics = {
@@ -612,6 +618,7 @@ def run_granularity_sweep(
     max_steps: int,
     time_step: float,
     save_dir: str,
+    shaped_reward_coef: float = 10.0,
 ):
     os.makedirs(save_dir, exist_ok=True)
 
@@ -627,6 +634,7 @@ def run_granularity_sweep(
             seed=gran_seed,
             max_steps=max_steps,
             time_step=time_step,
+            shaped_reward_coef=shaped_reward_coef,
         )
 
         all_metrics.append(metrics)
@@ -677,15 +685,16 @@ def make_objective(
         gamma = trial.suggest_float("gamma", 0.90, 0.999)
         batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
         buffer_size = trial.suggest_categorical("buffer_size", [50_000, 100_000, 200_000])
+        shaped_reward_coef = trial.suggest_float("shaped_reward_coef", 5.0, 15.0)
 
         train_env = DummyVecEnv([make_env(
             max_steps=max_steps, granularity=granularity, time_step=time_step,
-            seed=seed_train, log_dir=None
+            seed=seed_train, log_dir=None, shaped_reward_coef=shaped_reward_coef
         )])
 
         eval_env = DummyVecEnv([make_env(
             max_steps=max_steps, granularity=granularity, time_step=time_step,
-            seed=seed_eval, log_dir=None
+            seed=seed_eval, log_dir=None, shaped_reward_coef=shaped_reward_coef
         )])
 
         model = DQN(
@@ -722,7 +731,6 @@ def make_objective(
 # =========================
 # Optuna runner (n_trials as input)
 # =========================
-"""
 def run_optuna(
     n_trials: int,
     device: str = "cuda",
@@ -767,7 +775,6 @@ def run_optuna(
     elapsed = time.time() - start
 
     return study, elapsed
-"""
 
 import numpy as np
 from stable_baselines3 import DQN
@@ -780,6 +787,7 @@ def evaluate_success_rate(
     max_steps: int = 400,
     granularity: int = 40,
     time_step: float = 1.0,
+    shaped_reward_coef: float = 10.0,
 ):
     """
     Evalúa un modelo SB3 y retorna:
@@ -793,7 +801,7 @@ def evaluate_success_rate(
 
     eval_env = DummyVecEnv([make_env(
         max_steps=max_steps, granularity=granularity, time_step=time_step,
-        seed=seed, log_dir=None
+        seed=seed, log_dir=None, shaped_reward_coef=shaped_reward_coef
     )])
 
     model = DQN.load(model_path)
@@ -926,11 +934,10 @@ if __name__ == "__main__":
     # Network size
     policy_kwargs = dict(net_arch=[256, 256])
 
-    """
     # 0) Sanity check env
     print("\n[0] check_env...")
     tmp = CubeSatDetumblingEnv(render_mode=None, debug=False, plot_hist=False,
-                              max_steps=MAX_STEPS, granularity=GRANULARITY, time_step=TIME_STEP)
+                              max_steps=MAX_STEPS, granularity=GRANULARITY, time_step=TIME_STEP, shaped_reward_coef=10.0)
     check_env(tmp, warn=True)
     tmp.close()
     print("[0] OK ✅\n")
@@ -959,7 +966,7 @@ if __name__ == "__main__":
         print(f"[1] Optuna done in {elapsed:.1f}s")
         print("[1] Best params:", best_params, "\n")
     else:
-        best_params = {"learning_rate": 1e-4, "gamma": 0.99, "batch_size": 128, "buffer_size": 200_000}
+        best_params = {"learning_rate": 1e-4, "gamma": 0.99, "batch_size": 128, "buffer_size": 200_000, "shaped_reward_coef": 10.0}
         print("[1] Skipping Optuna. Using:", best_params, "\n")
 
     # 2) Final training with auto-best-save
@@ -986,8 +993,6 @@ if __name__ == "__main__":
     # 3) Evaluate best model
     print("[3] Evaluating best model (with success rate + plots)...")
 
-    best_model_path = "/home/mapacheroja/apr-lab-2/20260107_063620/best/best_model.zip"
-
     print("Evaluating...")
     eval_metrics = evaluate_with_history(
         best_model_path,
@@ -995,7 +1000,8 @@ if __name__ == "__main__":
         seed=999,
         max_steps=MAX_STEPS,
         granularity=GRANULARITY,
-        time_step=TIME_STEP
+        time_step=TIME_STEP,
+        shaped_reward_coef=best_params.get('shaped_reward_coef', 10.0)
     )
     print("Evaluating done.")
 
@@ -1015,19 +1021,19 @@ if __name__ == "__main__":
             "train_timesteps": OPTUNA_TRAIN_TIMESTEPS,
             "eval_episodes": OPTUNA_EVAL_EPISODES
         },
-        #"final_training": {
-        #    "timesteps": FINAL_TIMESTEPS,
-        #    "eval_freq": EVAL_FREQ,
-        #    "n_eval_episodes_during_train": N_EVAL_EPISODES,
-        #    "policy_kwargs": policy_kwargs,
-        # },
-        # "best_params": best_params,
-        # "final_eval": eval_metrics,
-        # "paths": {
-        #    "best_model": best_model_path,
-        #    "last_model": last_model_path,
-        #    "log_dir": LOG_DIR,
-        #},
+        "final_training": {
+            "timesteps": FINAL_TIMESTEPS,
+            "eval_freq": EVAL_FREQ,
+            "n_eval_episodes_during_train": N_EVAL_EPISODES,
+            "policy_kwargs": policy_kwargs,
+        },
+        "best_params": best_params,
+        "final_eval": eval_metrics,
+        "paths": {
+            "best_model": best_model_path,
+            "last_model": last_model_path,
+            "log_dir": LOG_DIR,
+        },
     }
 
     model = DQN.load(best_model_path)
@@ -1041,7 +1047,7 @@ if __name__ == "__main__":
     with open(RESULTS_PATH, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False, default=numpy_json_default)
 
-    monitor_path = "/home/mapacheroja/apr-lab-2/20260107_063620/logs/monitor.csv"
+    monitor_path = os.path.join(LOG_DIR, "monitor.csv")
 
     plot_training_monitor(
         monitor_csv_path=monitor_path,
@@ -1051,13 +1057,10 @@ if __name__ == "__main__":
     )
 
     plot_final_eval_from_json(
-        json_path="20260107_063620/dqn_results.json",
+        json_path=RESULTS_PATH,
         save_dir=PLOTS_DIR,
         prefix="final_eval"
-    ) 
-
-    """ 
-    best_model_path = "/home/mapacheroja/apr-lab-2/20260107_063620/best/best_model.zip"
+    )
 
     print("\n[4] Running granularity sweep...")
 
@@ -1071,6 +1074,7 @@ if __name__ == "__main__":
         max_steps=MAX_STEPS,
         time_step=TIME_STEP,
         save_dir=os.path.join(PLOTS_DIR, "granularity"),
+        shaped_reward_coef=best_params.get('shaped_reward_coef', 10.0),
     )
 
     plot_granularity_comparison(

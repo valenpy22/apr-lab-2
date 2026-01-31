@@ -38,7 +38,7 @@ class CubeSatDetumblingEnv(gym.Env):
 
     metadata = {'render_modes': ['human', 'none']}
 
-    def __init__(self, render_mode=None, max_steps=10, start_time=datetime.now(), time_step=0.1, granularity=40, debug=False, num_bins=4, plot_hist=False):
+    def __init__(self, render_mode=None, max_steps=10, start_time=datetime.now(), time_step=0.1, granularity=40, debug=False, num_bins=4, plot_hist=False, shaped_reward_coef=10.0):
         """
         Inicializar el entorno de CubeSat para el problema de detumbling.
 
@@ -58,6 +58,8 @@ class CubeSatDetumblingEnv(gym.Env):
         self.current_time = start_time
         self.sim_granularity = granularity
         self._plot_hist = plot_hist
+
+        self.shaped_reward_coef = shaped_reward_coef
 
         # inicializar componentes del simulador
         self.rotation_sim = None
@@ -115,11 +117,12 @@ class CubeSatDetumblingEnv(gym.Env):
         T = float(self.max_torque)
 
         # niveles de magnitud (fine control cerca de 0)
-        mags = np.array([T, T/2, T/4, T/8, T/16], dtype=np.float32)
+        mags = np.array([T], dtype=np.float32)
+        magsz = np.array([T, T/8], dtype=np.float32)
 
         # 0 torque
-        action_map[index] = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-        index += 1
+        # action_map[index] = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        # index += 1
 
         # X axis
         for m in mags:
@@ -132,7 +135,7 @@ class CubeSatDetumblingEnv(gym.Env):
             action_map[index] = np.array([0.0, -m, 0.0], dtype=np.float32); index += 1
 
         # Z axis
-        for m in mags:
+        for m in magsz:
             action_map[index] = np.array([0.0, 0.0, +m], dtype=np.float32); index += 1
             action_map[index] = np.array([0.0, 0.0, -m], dtype=np.float32); index += 1
             
@@ -410,7 +413,7 @@ class CubeSatDetumblingEnv(gym.Env):
 
         # 2) Shaping por mejora (si baja ||ω||, positivo)
         improvement = previous_angular_vel_norm - angular_vel_norm
-        shaped_reward = 10.0 * improvement
+        shaped_reward = self.shaped_reward_coef * improvement
 
         # 3) Penalización de control adaptativa:
         #    lejos: suave; cerca: fuerte (para evitar sobre-control y oscilación)
